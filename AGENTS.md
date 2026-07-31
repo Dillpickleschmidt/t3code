@@ -146,3 +146,17 @@ Full glossary with file links: `docs/internals/glossary.md`
 
 - Don't verify with browsers or computer use unless the user explicitly agrees or requests it.
 - Security is important, but should not be over-indexed on, especially for dev mode/maintainer-only features.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on the fork, `Dillpickleschmidt/t3code` — never on the `pingdotgg/t3code` upstream. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Multi-context — a root `CONTEXT-MAP.md` pointing at per-context `CONTEXT.md` files under `apps/` and `packages/`. See `docs/agents/domain.md`.
