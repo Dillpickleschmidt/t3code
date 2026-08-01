@@ -78,7 +78,7 @@ export class CitymapBuildError extends Schema.TaggedErrorClass<CitymapBuildError
       "readDirectory",
       "stat",
     ]),
-    cause: Schema.Defect(),
+    cause: Schema.optionalKey(Schema.Defect()),
   },
 ) {
   override get message(): string {
@@ -209,6 +209,11 @@ export const make = Effect.gen(function* () {
   ) {
     const absolute = path.join(root, relativePath);
     const info = yield* fileSystem.stat(absolute);
+    // `stat` follows symlinks, and git can track a symlink to a FIFO or a
+    // character device. Reading one blocks the build forever, and every later
+    // caller joins that in-flight build — so skip anything not a regular file.
+    // A divergence from mindwalk, which would hang; a server cannot afford to.
+    if (info.type !== "File") return null;
     const knownBinary = BINARY_EXTENSIONS.has(extensionOf(relativePath).toLowerCase());
     const lines = knownBinary ? 1 : yield* countLines(absolute).pipe(Effect.orElseSucceed(() => 0));
 
@@ -272,7 +277,9 @@ export const make = Effect.gen(function* () {
 
     return {
       commit: head && head.exitCode === 0 ? head.stdout.trim() || null : null,
-      dirty: status !== null && status.exitCode === 0 && status.stdout.trim().length > 0,
+      // A status we could not read is treated as dirty: the alternative is
+      // pinning a possibly-stale citymap under HEAD forever.
+      dirty: status === null || status.exitCode !== 0 ? true : status.stdout.trim().length > 0,
     };
   });
 

@@ -215,6 +215,27 @@ it.layer(CitymapTestLayer)("CitymapBuilder", (it) => {
     }),
   );
 
+  it.effect("skips a symlink to a special file rather than reading it", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-citymap-device-" });
+      yield* writeFile(root, "real.txt", "ordinary\n");
+      // A character device stands in for the dangerous case: a symlinked FIFO
+      // would block the read loop forever, and every caller joining that
+      // in-flight build with it.
+      yield* fileSystem.symlink("/dev/null", path.join(root, "device"));
+
+      const builder = yield* CitymapBuilder.CitymapBuilder;
+      const city = yield* builder.buildForRoot(root);
+
+      assert.deepEqual(
+        city.files.map((entry) => entry.path),
+        ["real.txt"],
+      );
+    }),
+  );
+
   it.effect("does not follow a symlinked directory out of the walked root", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
