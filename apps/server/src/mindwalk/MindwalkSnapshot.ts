@@ -102,7 +102,26 @@ export const make = Effect.gen(function* () {
       messages.listByThreadId({ threadId }),
     ]);
 
-    const fingerprint = fingerprintRows(traceRows, messageRows);
+    // The snapshot embeds a citymap, so repository state is one of its inputs
+    // too: a new commit changes the map without adding a single activity row.
+    // CitymapBuilder already keys on commit and dirty state and caches the
+    // expensive walk, so consulting it first is cheap and tells us the repo
+    // identity to fold into the key. It can legitimately fail — six threads in
+    // a real store are rooted at a home directory that is not a repository —
+    // and a timeline without buildings still plays; mindwalk degrades the same
+    // way.
+    const generatedAt = DateTime.formatIso(yield* DateTime.now);
+    let citymapFailed = false;
+    const base = yield* citymapBuilder.buildForRoot(root).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logDebug("mindwalk citymap build failed; serving trace only", cause).pipe(
+          Effect.as(emptyCitymap(root, generatedAt)),
+          Effect.tap(() => Effect.sync(() => (citymapFailed = true))),
+        ),
+      ),
+    );
+
+    const fingerprint = fingerprintRows(traceRows, messageRows, base);
     const cached = cache.get(cacheKey);
     if (cached && cached.fingerprint === fingerprint) {
       yield* Effect.annotateCurrentSpan({ "mindwalk.cache": "hit" });
@@ -121,18 +140,9 @@ export const make = Effect.gen(function* () {
       repoPathExists: makeRepoPathExists(root, path),
     });
 
-    // The citymap can legitimately fail — six threads in a real store are
-    // rooted at a home directory that is not a repository — and a timeline
-    // without buildings still plays. mindwalk degrades the same way.
-    const generatedAt = DateTime.formatIso(yield* DateTime.now);
-    const citymap = yield* citymapBuilder.buildForRoot(root).pipe(
-      Effect.map((base) => withGhosts(base, ghostPathsOf(trace))),
-      Effect.catchCause((cause) =>
-        Effect.logDebug("mindwalk citymap build failed; serving trace only", cause).pipe(
-          Effect.as(emptyCitymap(root, generatedAt)),
-        ),
-      ),
-    );
+    // A failed build has no repository to raise ghosts against, so it stays
+    // empty rather than gaining buildings for files it never saw.
+    const citymap = citymapFailed ? base : withGhosts(base, ghostPathsOf(trace));
 
     const snapshot: MindwalkSnapshot = {
       trace: finalizeTrace(trace, citymap),
@@ -276,8 +286,9 @@ function evictOldest(cache: Map<string, CacheEntry>): void {
 /**
  * A cheap content fingerprint over the two row sets `buildTrace` consumes.
  *
- * Covers inserts, deletes, reordering, and rewrites — including payload-only
- * ones, which `upsert`'s ON CONFLICT DO UPDATE makes possible without moving
+ * Covers every input the snapshot has: both row sets and the repository state
+ * the citymap is built from. Catches inserts, deletes, reordering, and rewrites
+ * — including payload-only ones, which `upsert`'s ON CONFLICT DO UPDATE makes possible without moving
  * the row count. Serialising each payload costs milliseconds on the largest
  * thread in the store, against a miss that reads every file in the repository.
  */
@@ -289,7 +300,15 @@ function fingerprintRows(
     readonly createdAt: string;
     readonly payload: unknown;
   }>,
-  messageRows: ReadonlyArray<{ readonly messageId: string; readonly createdAt: string }>,
+  messageRows: ReadonlyArray<{
+    readonly messageId: string;
+    readonly createdAt: string;
+    readonly role: string;
+    readonly text: string;
+  }>,
+  citymap: {
+    readonly repo: { readonly root: string; readonly commit?: string; readonly dirty: boolean };
+  },
 ): string {
   let hash = 0x811c9dc5;
   const mix = (value: string) => {
@@ -304,6 +323,11 @@ function fingerprintRows(
     mix(`${row.activityId}|${row.kind}|${row.sequence ?? ""}|${row.createdAt}`);
     mix(JSON.stringify(row.payload) ?? "");
   }
-  for (const row of messageRows) mix(`${row.messageId}|${row.createdAt}`);
+  // `buildTrace` reads role and text, and the message repository rewrites both
+  // in place while a turn streams.
+  for (const row of messageRows) {
+    mix(`${row.messageId}|${row.createdAt}|${row.role}|${row.text}`);
+  }
+  mix(`${citymap.repo.root}|${citymap.repo.commit ?? ""}|${citymap.repo.dirty}`);
   return `${traceRows.length}:${messageRows.length}:${(hash >>> 0).toString(36)}`;
 }
