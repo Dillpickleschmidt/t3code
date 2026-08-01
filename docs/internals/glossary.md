@@ -11,6 +11,7 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 - [Orchestration](#orchestration)
 - [Provider runtime](#provider-runtime)
 - [Checkpointing](#checkpointing)
+- [Citymap](#citymap)
 
 ## Concepts
 
@@ -140,6 +141,20 @@ The patch difference between two checkpoints. Query logic lives in [CheckpointDi
 
 The file patch and changed-file summary for one turn. It is usually computed in [CheckpointDiffQuery.ts][20], represented in [the contracts][1], and recorded into thread state by [projector.ts][4].
 
+### Citymap
+
+#### Citymap
+
+The deterministic spatial layout of a repository: every file gets a baked rect in a fixed 120x120 world, laid out as a squarified treemap over the directory tree. It is trace-independent by design, so a file sits in the same place every session and spatial memory forms. Ported from [mindwalk](https://github.com/cosmtrek/mindwalk) (MIT) into [CitymapLayout.ts][25] and [CitymapBuilder.ts][26], typed in [the contracts][1], and served over HTTP at `GET /api/citymap/threads/:threadId` — never the websocket, because the payload is hundreds of kilobytes gzipped.
+
+#### File weight
+
+What sizes a building: `sqrt(max(lines, bytes/4096, 16))`. Lines dominate for source, bytes for assets, and the floor of 16 keeps tiny files clickable. See [CitymapLayout.ts][25].
+
+#### Ghost
+
+A citymap building for a path that no longer exists on disk, kept so history that touched the file still has somewhere to land. Ghosts carry no lines or bytes. See [CitymapLayout.ts][25].
+
 ## Practical Shortcuts
 
 - If you see `requested`, think "intent recorded".
@@ -179,3 +194,5 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [22]: ../../apps/server/src/checkpointing/Utils.ts
 [23]: ../../apps/server/src/checkpointing/Diffs.ts
 [24]: ./overview.md
+[25]: ../../apps/server/src/citymap/CitymapLayout.ts
+[26]: ../../apps/server/src/citymap/CitymapBuilder.ts

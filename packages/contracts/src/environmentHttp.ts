@@ -25,6 +25,7 @@ import {
   ServerAuthSessionMethod,
 } from "./auth.ts";
 import { AuthSessionId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { Citymap } from "./citymap.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import {
   ClientOrchestrationCommand,
@@ -84,6 +85,7 @@ export const EnvironmentInternalErrorReason = Schema.Literals([
   "orchestration_snapshot_failed",
   "orchestration_thread_snapshot_failed",
   "orchestration_dispatch_failed",
+  "citymap_build_failed",
   "internal_error",
 ]);
 export type EnvironmentInternalErrorReason = typeof EnvironmentInternalErrorReason.Type;
@@ -489,6 +491,24 @@ export class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make("orchestr
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
+const EnvironmentCitymapParams = Schema.Struct({
+  threadId: ThreadId,
+});
+
+/**
+ * Citymaps are served over HTTP rather than the websocket: the payload is
+ * hundreds of kilobytes gzipped and would blow the wire budget the socket
+ * protects. The global gzip middleware compresses it on the way out.
+ */
+export class EnvironmentCitymapHttpApi extends HttpApiGroup.make("citymap").add(
+  HttpApiEndpoint.get("threadCitymap", "/api/citymap/threads/:threadId", {
+    headers: OptionalBearerHeaders,
+    params: EnvironmentCitymapParams,
+    success: Citymap,
+    error: EnvironmentOrchestrationThreadSnapshotErrors,
+  }).middleware(EnvironmentAuthenticatedAuth),
+) {}
+
 export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   .add(
     HttpApiEndpoint.post("linkProof", "/api/connect/link-proof", {
@@ -554,4 +574,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentMetadataHttpApi)
   .add(EnvironmentAuthHttpApi)
   .add(EnvironmentOrchestrationHttpApi)
+  .add(EnvironmentCitymapHttpApi)
   .add(EnvironmentConnectHttpApi) {}
