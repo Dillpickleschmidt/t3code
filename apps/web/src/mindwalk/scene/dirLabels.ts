@@ -130,17 +130,23 @@ export class DirLabelSet {
     }
   }
 
-  // labels ease toward their LOD targets each frame
-  ease(reduced: boolean) {
+  // labels ease toward their LOD targets each frame. Returns whether any
+  // opacity actually moved: the demand-driven frame loop keeps drawing only
+  // while a fade is still in flight.
+  ease(reduced: boolean): boolean {
+    let easing = false;
     for (const label of this.labels) {
       const material = label.sprite.material as THREE.SpriteMaterial;
       const diff = label.target - material.opacity;
       if (Math.abs(diff) > 0.02) {
         material.opacity = reduced ? label.target : material.opacity + diff * 0.16;
+        easing = true;
       } else if (material.opacity !== label.target) {
         material.opacity = label.target;
+        easing = true;
       }
       label.sprite.visible = material.opacity > 0.02;
     }
+    return easing;
   }
 }
