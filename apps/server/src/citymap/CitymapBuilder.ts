@@ -16,6 +16,7 @@ import type { Citymap } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -59,7 +60,12 @@ const BINARY_SNIFF_BYTES = 8192;
 const INSPECT_CONCURRENCY = 32;
 /** How long a citymap built from a dirty tree stays valid. */
 const DIRTY_CACHE_TTL_MS = 30_000;
-/** Roots kept in the cache, oldest evicted first. */
+/**
+ * Roots kept in the cache, oldest evicted first. Matches mindwalk's
+ * `repoMapMaxEntries`. A citymap of this repo — 15.7k files, 1.7k dirs, the
+ * largest tree we expect — measures ~3.5 MB on the heap, so a full cache is
+ * ~57 MB in the worst case and far less for ordinary repositories.
+ */
 const CACHE_MAX_ENTRIES = 16;
 
 export class CitymapBuildError extends Schema.TaggedErrorClass<CitymapBuildError>()(
@@ -99,6 +105,13 @@ export const make = Effect.gen(function* () {
   const registry = yield* VcsDriverRegistry.VcsDriverRegistry;
 
   const cache = new Map<string, CacheEntry>();
+  /**
+   * Builds currently running, by root. mindwalk holds `repoMapMu` across its
+   * whole build so a second caller waits rather than walking the tree twice;
+   * this does the same per root instead of globally, because one project's
+   * walk must not block another's on a server that hosts many.
+   */
+  const inFlight = new Map<string, Deferred.Deferred<Citymap, CitymapBuildError>>();
 
   const failBuild = (root: string, detail: string) => (cause: unknown) =>
     new CitymapBuildError({ root, detail, cause });
@@ -246,28 +259,54 @@ export const make = Effect.gen(function* () {
       return cached.citymap;
     }
 
-    const relativePaths = yield* listFiles(root, handle?.driver ?? null);
-    const inspected = yield* Effect.forEach(
-      relativePaths,
-      (relativePath) => inspectFile(root, relativePath).pipe(Effect.orElseSucceed(() => null)),
-      { concurrency: INSPECT_CONCURRENCY },
+    // Join a build already running for this root instead of repeating it.
+    // Claiming is synchronous — `makeUnsafe` and the `set` below leave no
+    // yield point between the lookup and the claim — so two fibers arriving
+    // together cannot both become the builder.
+    const running = inFlight.get(root);
+    if (running) {
+      yield* Effect.annotateCurrentSpan({ "citymap.cache": "joined" });
+      return yield* Deferred.await(running);
+    }
+    const deferred = Deferred.makeUnsafe<Citymap, CitymapBuildError>();
+    inFlight.set(root, deferred);
+
+    return yield* Effect.gen(function* () {
+      const relativePaths = yield* listFiles(root, handle?.driver ?? null);
+      const inspected = yield* Effect.forEach(
+        relativePaths,
+        (relativePath) => inspectFile(root, relativePath).pipe(Effect.orElseSucceed(() => null)),
+        { concurrency: INSPECT_CONCURRENCY },
+      );
+
+      const citymap = buildCitymap({
+        root,
+        commit: repoState.commit,
+        dirty: repoState.dirty,
+        generatedAt: DateTime.formatIso(yield* DateTime.now),
+        files: inspected.filter((file): file is InspectedFile => file !== null),
+      });
+
+      cache.set(root, { key: cacheKey, builtAt: now, citymap });
+      evictOldest();
+      yield* Effect.annotateCurrentSpan({
+        "citymap.cache": "miss",
+        "citymap.file_count": citymap.files.length,
+      });
+      return citymap;
+    }).pipe(
+      // Hand the outcome to every joiner, including on failure or interrupt,
+      // so a waiter can never outlive the build it is waiting on.
+      Effect.onExit((exit) =>
+        Deferred.done(deferred, exit).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              inFlight.delete(root);
+            }),
+          ),
+        ),
+      ),
     );
-
-    const citymap = buildCitymap({
-      root,
-      commit: repoState.commit,
-      dirty: repoState.dirty,
-      generatedAt: DateTime.formatIso(yield* DateTime.now),
-      files: inspected.filter((file): file is InspectedFile => file !== null),
-    });
-
-    cache.set(root, { key: cacheKey, builtAt: now, citymap });
-    evictOldest();
-    yield* Effect.annotateCurrentSpan({
-      "citymap.cache": "miss",
-      "citymap.file_count": citymap.files.length,
-    });
-    return citymap;
   });
 
   function evictOldest() {
