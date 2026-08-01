@@ -3,16 +3,15 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { touchWord, type CityFile, type CityMap, type Touch } from "../types";
 import type { FilePlayback } from "../playback/reducer";
+import { paletteFor, type MindwalkTheme, type ScenePalette } from "../palette";
 import { DirLabelSet } from "./dirLabels";
 import {
   disposeGroup,
-  EMBER,
   ensureVisible,
   fitDistance,
   prefersReducedMotion,
   SceneTip,
-  SKY,
-  touchColors,
+  touchColorsFor,
 } from "./sceneUtils";
 import { ATTRACT_DRIFT_MS, FrameLoop } from "./frameLoop";
 import { fireflyTexture } from "./textures";
@@ -29,16 +28,23 @@ interface CitySceneProps {
   locHeights?: boolean;
   // the scrubber is playing: the one state that earns a continuous frame loop
   playing?: boolean;
+  /** Which palette the stage renders in — see `../palette.ts`. */
+  theme: MindwalkTheme;
 }
 
-// Attention terrain: the map is a flat dark plain (fog of war); height is
-// earned by attention — touch depth × revisits — so mountains grow where the
-// walker lingered. Light is data: only touched terrain gets bright color.
-const colors: Record<Touch | "unvisited" | "ghost" | "selected", THREE.Color> = {
-  unvisited: new THREE.Color("#5b6372"),
-  ghost: new THREE.Color("#404551"),
-  ...touchColors,
-};
+// Attention terrain: the map is a flat plain (fog of war); height is earned by
+// attention — touch depth × revisits — so mountains grow where the walker
+// lingered. One channel carries the state: at night only touched terrain gets
+// bright color, by day only touched terrain gets saturated ink.
+type SceneColors = Record<Touch | "unvisited" | "ghost" | "selected", THREE.Color>;
+
+function sceneColors(palette: ScenePalette): SceneColors {
+  return {
+    unvisited: new THREE.Color(palette.city.unvisited),
+    ghost: new THREE.Color(palette.city.ghost),
+    ...touchColorsFor(palette),
+  };
+}
 
 const TILE_H = 0.14;
 const LABEL_Y = 2.4;
@@ -68,24 +74,26 @@ function locHeight(t: number): number {
 
 // LOC tier ramp: small files stay grey, then warm up through orange and purple
 // to red for the largest files. Stops are interpolated so the terrain reads as
-// a continuous gradient rather than hard bands.
-const LOC_RAMP: { at: number; color: THREE.Color }[] = [
-  { at: 0.0, color: new THREE.Color("#5b6372") }, // grey (matches unvisited)
-  { at: 0.35, color: new THREE.Color("#e0894f") }, // orange
-  { at: 0.7, color: new THREE.Color("#9a6bd8") }, // purple
-  { at: 1.0, color: new THREE.Color("#e0524f") }, // red
-];
-function locColor(t: number): THREE.Color {
-  for (let i = 1; i < LOC_RAMP.length; i++) {
-    if (t <= LOC_RAMP[i]!.at) {
-      const lo = LOC_RAMP[i - 1]!;
-      const hi = LOC_RAMP[i]!;
+// a continuous gradient rather than hard bands. Positions are fixed; the four
+// colors come from the palette (grey stop always matches `unvisited`).
+const LOC_RAMP_STOPS = [0.0, 0.35, 0.7, 1.0] as const;
+type LocRamp = { at: number; color: THREE.Color }[];
+
+function locRampFor(palette: ScenePalette): LocRamp {
+  return LOC_RAMP_STOPS.map((at, i) => ({ at, color: new THREE.Color(palette.city.locRamp[i]!) }));
+}
+
+function locColor(t: number, ramp: LocRamp): THREE.Color {
+  for (let i = 1; i < ramp.length; i++) {
+    if (t <= ramp[i]!.at) {
+      const lo = ramp[i - 1]!;
+      const hi = ramp[i]!;
       const span = hi.at - lo.at;
       const k = span > 0 ? (t - lo.at) / span : 0;
       return lo.color.clone().lerp(hi.color, k);
     }
   }
-  return LOC_RAMP[LOC_RAMP.length - 1]!.color.clone();
+  return ramp[ramp.length - 1]!.color.clone();
 }
 
 interface TerrainSlot {
@@ -102,7 +110,14 @@ export function CityScene({
   onCanvasReady,
   locHeights,
   playing = false,
+  theme,
 }: CitySceneProps) {
+  // A theme switch rebuilds the stage rather than mutating every material in
+  // place: it happens once in a blue moon, and the alternative is a second
+  // code path that has to stay in step with scene construction forever.
+  const palette = useMemo(() => paletteFor(theme).scene, [theme]);
+  const colors = useMemo(() => sceneColors(palette), [palette]);
+  const locRamp = useMemo(() => locRampFor(palette), [palette]);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const tileMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const terrainMeshRef = useRef<THREE.InstancedMesh | null>(null);
@@ -160,7 +175,7 @@ export function CityScene({
     reducedRef.current = reduced;
 
     const scene = new THREE.Scene();
-    scene.background = SKY;
+    scene.background = new THREE.Color(palette.sky);
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(
@@ -207,9 +222,13 @@ export function CityScene({
     });
     controlsRef.current = controls;
 
-    const sky = new THREE.HemisphereLight("#66779b", "#161922", 1.7);
+    const sky = new THREE.HemisphereLight(
+      palette.light.hemiSky,
+      palette.light.hemiGround,
+      palette.light.hemiIntensity,
+    );
     scene.add(sky);
-    const moon = new THREE.DirectionalLight("#b6c5de", 1.1);
+    const moon = new THREE.DirectionalLight(palette.light.sunColor, palette.light.sunIntensity);
     moon.position.set(-60, 120, -40);
     scene.add(moon);
 
@@ -386,7 +405,7 @@ export function CityScene({
       scene.clear();
       onCanvasReady?.(null);
     };
-  }, [onSelect, onCanvasReady]);
+  }, [onSelect, onCanvasReady, palette]);
 
   // build the plain: ground, grid, district plates, flat file tiles
   useEffect(() => {
@@ -403,7 +422,7 @@ export function CityScene({
     const group = new THREE.Group();
     const size = bounds.size;
 
-    scene.fog = new THREE.Fog(SKY, size * 2.1, size * 4.2);
+    scene.fog = new THREE.Fog(new THREE.Color(palette.sky), size * 2.1, size * 4.2);
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(size * 6, size * 6),
@@ -439,7 +458,9 @@ export function CityScene({
           new THREE.Vector3(dir.rect.w, height, dir.rect.d),
         );
         plates.setMatrixAt(i, matrix);
-        shade.set("#1a1f29").lerp(new THREE.Color("#252b37"), Math.min(dir.depth, 3) / 3);
+        shade
+          .set(palette.city.dirShadeNear)
+          .lerp(new THREE.Color(palette.city.dirShadeFar), Math.min(dir.depth, 3) / 3);
         plates.setColorAt(i, shade);
       });
       plates.instanceMatrix.needsUpdate = true;
@@ -463,7 +484,7 @@ export function CityScene({
         new THREE.Vector3(sx, TILE_H, sz),
       );
       tiles.setMatrixAt(file.id, matrix);
-      tiles.setColorAt(file.id, baseColor(file));
+      tiles.setColorAt(file.id, baseColor(file, colors));
     }
     tiles.instanceMatrix.needsUpdate = true;
     if (tiles.instanceColor) tiles.instanceColor.needsUpdate = true;
@@ -500,14 +521,15 @@ export function CityScene({
         })),
       group,
       LABEL_Y,
+      palette.labelInk,
       true,
     );
 
     const firefly = new THREE.Sprite(
       new THREE.SpriteMaterial({
-        map: fireflyTexture(),
-        color: EMBER,
-        blending: THREE.AdditiveBlending,
+        map: fireflyTexture(palette.fireflyStops),
+        color: new THREE.Color(palette.ember),
+        blending: palette.glowBlending,
         depthWrite: false,
         transparent: true,
       }),
@@ -517,7 +539,7 @@ export function CityScene({
     fireflyRef.current = firefly;
     group.add(firefly);
 
-    const trail = new TrailRenderer(1.4);
+    const trail = new TrailRenderer(1.4, palette);
     trailRef.current = trail;
     group.add(trail.object);
 
@@ -564,7 +586,7 @@ export function CityScene({
       fireflyRef.current = null;
       labelSetRef.current = null;
     };
-  }, [city, bounds]);
+  }, [city, bounds, palette, colors]);
 
   // playback → terrain targets and colors
   useEffect(() => {
@@ -588,7 +610,7 @@ export function CityScene({
     for (const file of city.files) {
       const touch = playback.touchByFile.get(file.id);
       const selected = file.path === selectedPath;
-      tiles.setColorAt(file.id, selected ? colors.selected : baseColor(file));
+      tiles.setColorAt(file.id, selected ? colors.selected : baseColor(file, colors));
       if (touch) {
         const visits = playback.visitsByFile.get(file.id) ?? 1;
         let color = colors[touch];
@@ -598,7 +620,7 @@ export function CityScene({
         present.add(file.id);
       } else if (locHeights) {
         const t = locFraction(file.lines, maxLog);
-        let color = locColor(t);
+        let color = locColor(t, locRamp);
         if (file.ghost) color = color.lerp(colors.ghost, 0.45);
         if (selected) color = colors.selected;
         slots.push({ fileId: file.id, target: locHeight(t), color });
@@ -622,7 +644,7 @@ export function CityScene({
     // slot index → fileId may have shifted even where no column is lerping
     terrainDirtyRef.current = true;
     loopRef.current?.invalidate();
-  }, [city, playback, selectedPath, locHeights]);
+  }, [city, playback, selectedPath, locHeights, colors, locRamp]);
 
   // the inspector opens over the right edge; pan the selected tile clear of it
   useEffect(() => {
@@ -682,7 +704,7 @@ export function CityScene({
       }),
     );
     loopRef.current?.invalidate();
-  }, [city, playback, bounds]);
+  }, [city, playback, bounds, palette]);
 
   // starting or stopping the walk switches the loop between continuous and
   // demand-driven; either edge needs a frame to act on it
@@ -710,7 +732,7 @@ function attentionColumnGeometry(): THREE.BoxGeometry {
   return geo;
 }
 
-function baseColor(file: CityFile): THREE.Color {
+function baseColor(file: CityFile, colors: SceneColors): THREE.Color {
   if (file.ghost) return colors.ghost;
   let h = 2166136261;
   for (let i = 0; i < file.path.length; i++) {

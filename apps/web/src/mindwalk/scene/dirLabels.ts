@@ -39,11 +39,17 @@ export class DirLabelSet {
   // sprites start invisible and fade in once the first projection pass runs;
   // alwaysOnTop labels (terrain) skip the depth test so mountains never bury
   // the district names
-  constructor(entries: DirLabelEntry[], group: THREE.Group, y: number, alwaysOnTop = false) {
+  constructor(
+    entries: DirLabelEntry[],
+    group: THREE.Group,
+    y: number,
+    ink: string,
+    alwaysOnTop = false,
+  ) {
     this.y = y;
     const budget = [...entries].sort((a, b) => b.fileCount - a.fileCount).slice(0, LABEL_BUDGET);
     for (const entry of budget) {
-      const { texture, aspect } = labelTexture(entry.name);
+      const { texture, aspect } = labelTexture(entry.name, ink);
       const sprite = new THREE.Sprite(
         new THREE.SpriteMaterial({
           map: texture,

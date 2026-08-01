@@ -1,43 +1,54 @@
-/* Minimal load-bearing styling for the ported scenes, lifted from mindwalk's
- * styles.css: the scenes absolutely fill their host and the hover tip is a
- * floating chip. Values are mindwalk's; restyling to T3 tokens is later work. */
-.mindwalk-surface {
-  --hairline-strong: oklch(0.46 0.016 252);
-  --ink: oklch(0.91 0.014 88);
-  --muted: oklch(0.72 0.02 252);
-  --text-xs: 0.75rem;
-  position: relative;
-  height: 100%;
-  overflow: hidden;
+/* The scoped layer for the 3D surface: everything that Tailwind and T3's
+ * tokens genuinely cannot express.
+ *
+ * Mindwalk's `styles.css` is 2,452 lines. Almost all of it is now Tailwind on
+ * T3's tokens over in `ui/`, and the colors that encode meaning live in
+ * `palette.ts`. What survives here is the short list that has to be CSS: the
+ * host the renderer appends its canvas into, the hover tip the scenes build
+ * imperatively (so React never re-renders on pointermove), and one glass
+ * recipe shared by every panel that floats over the stage. */
+
+/* Overlay chrome. T3's own glass tokens, so this tracks the app's theme —
+ * including the blur and saturation the dark theme overrides. */
+.mindwalk-glass {
+  background: color-mix(in srgb, var(--card) var(--glass-opacity), transparent);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
 }
 
-.mindwalk-surface .city-scene {
+/* the renderer's host: both scenes fill their stage absolutely */
+.city-scene {
   position: absolute;
   inset: 0;
 }
-.mindwalk-surface .city-scene canvas {
+
+.city-scene canvas {
   display: block;
 }
 
-.mindwalk-surface .scene-tip {
+/* One-line hover readout, driven imperatively from the scenes' pointermove
+ * handlers (see `SceneTip` in scene/sceneUtils.ts) — it is created and
+ * positioned outside React, so it cannot be a component. */
+.scene-tip {
   position: absolute;
   z-index: 30;
   display: none;
   max-width: 380px;
   padding: 5px 9px;
-  border: 1px solid var(--hairline-strong);
-  border-radius: 4px;
-  background: oklch(0.245 0.014 256 / 0.97);
-  color: var(--ink);
-  font-size: var(--text-xs);
-  letter-spacing: 0.01em;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  background: color-mix(in srgb, var(--popover) 96%, transparent);
+  color: var(--popover-foreground);
+  font-size: 0.75rem;
   line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
   font-variant-numeric: tabular-nums;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--foreground) 12%, transparent);
 }
-.mindwalk-surface .scene-tip .dim {
-  color: var(--muted);
+
+.scene-tip .dim {
+  color: var(--muted-foreground);
 }
