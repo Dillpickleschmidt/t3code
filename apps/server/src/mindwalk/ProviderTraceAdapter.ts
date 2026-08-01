@@ -172,6 +172,10 @@ const acpAdapter = (harness: string): ProviderTraceAdapter => ({
     const data = asRecord(payload.data);
     if (data === null) return null;
     const kind = asString(data["kind"]) ?? "";
+    // ACP reports failure structurally; the neighbouring adapters already
+    // read it. Hard-coding success here would report a failed Cursor/Grok
+    // call as a clean one and skew the error rate the histogram shows.
+    const isError = data["status"] === "failed";
     const locations = asArray(data["locations"]).flatMap((location) => {
       const path = asString(asRecord(location)?.["path"]);
       return path === null ? [] : [path];
@@ -182,7 +186,7 @@ const acpAdapter = (harness: string): ProviderTraceAdapter => ({
       case "read":
         return {
           call: { tool: "Read", input: primary === undefined ? {} : { file_path: primary } },
-          result: { content: contentToString(data["rawOutput"]), isError: false },
+          result: { content: contentToString(data["rawOutput"]), isError },
         };
       case "edit":
       case "delete":
@@ -193,7 +197,7 @@ const acpAdapter = (harness: string): ProviderTraceAdapter => ({
             input: primary === undefined ? {} : { file_path: primary },
             seeds: locations.slice(1).map((path) => ({ path, touch: "edit" }) as const),
           },
-          result: { content: "", isError: false },
+          result: { content: "", isError },
         };
       case "search":
         return {
@@ -202,12 +206,12 @@ const acpAdapter = (harness: string): ProviderTraceAdapter => ({
             input: {},
             seeds: locations.map((path) => ({ path, touch: "hit" }) as const),
           },
-          result: { content: contentToString(data["rawOutput"]), isError: false },
+          result: { content: contentToString(data["rawOutput"]), isError },
         };
       case "execute":
         return {
           call: { tool: "Bash", input: { command: asString(data["command"]) ?? "" } },
-          result: { content: contentToString(data["rawOutput"]), isError: false },
+          result: { content: contentToString(data["rawOutput"]), isError },
         };
       default:
         // Touched, kind unknown: keep the event on the histogram and seed
@@ -218,7 +222,7 @@ const acpAdapter = (harness: string): ProviderTraceAdapter => ({
             input: {},
             seeds: locations.map((path) => ({ path, touch: "hit" }) as const),
           },
-          result: { content: contentToString(data["rawOutput"]), isError: false },
+          result: { content: contentToString(data["rawOutput"]), isError },
         };
     }
   },

@@ -178,10 +178,11 @@ layer("MindwalkSnapshotService", (it) => {
     }),
   );
 
-  it.effect("serves from cache until the thread's activity count changes", () =>
+  it.effect("invalidates the cache on anything the trace reads, and nothing else", () =>
     Effect.gen(function* () {
       const service = yield* MindwalkSnapshotService;
       const activities = yield* ProjectionThreadActivityRepository;
+      const messages = yield* ProjectionThreadMessageRepository;
       const threadId = ThreadId.make("thread-cache");
       yield* (yield* ProjectionThreadSessionRepository).upsert(claudeSession(threadId));
       yield* activities.upsert(toolActivity(threadId, "c-1", 0, "/repo/src/a.ts"));
@@ -192,12 +193,34 @@ layer("MindwalkSnapshotService", (it) => {
       assert.equal(citymapBuilds, before + 1);
       assert.strictEqual(first, second);
 
-      // A bookkeeping activity still moves the count, so the key is
-      // conservative — it can never miss new work, only redo it.
+      // An activity of a kind the trace never reads is not an input, so it
+      // must not force a rebuild. A row count could not tell the difference.
       yield* activities.upsert(noiseActivity(threadId, "c-2", 1));
+      assert.strictEqual(Option.getOrThrow(yield* service.getSnapshot(threadId, undefined)), first);
+      assert.equal(citymapBuilds, before + 1);
+
+      // A user message is an input — it becomes a mark — but adds no activity
+      // row, so a count-based key would have served this stale.
+      yield* messages.upsert({
+        messageId: MessageId.make("msg-cache"),
+        threadId,
+        turnId: null,
+        role: "user",
+        text: "and now this",
+        isStreaming: false,
+        createdAt: IsoDateTime.make("2026-02-28T19:05:00.000Z"),
+        updatedAt: IsoDateTime.make("2026-02-28T19:05:00.000Z"),
+      });
       const third = Option.getOrThrow(yield* service.getSnapshot(threadId, undefined));
       assert.equal(citymapBuilds, before + 2);
-      assert.notStrictEqual(first, third);
+      assert.notStrictEqual(third, first);
+
+      // `upsert` is ON CONFLICT DO UPDATE, so rewriting an existing activity
+      // leaves the count unchanged while changing what the trace projects.
+      yield* activities.upsert(toolActivity(threadId, "c-1", 0, "/repo/src/rewritten.ts"));
+      const fourth = Option.getOrThrow(yield* service.getSnapshot(threadId, undefined));
+      assert.equal(citymapBuilds, before + 3);
+      assert.notStrictEqual(fourth, third);
     }),
   );
 

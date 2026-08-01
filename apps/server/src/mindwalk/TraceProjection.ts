@@ -124,10 +124,21 @@ export function buildTrace(input: TraceProjectionInput): Trace {
     }
   };
 
+  /**
+   * The activity query orders `sequence IS NULL` rows first, so iteration
+   * order is not monotonic in `createdAt` — an unsequenced row can carry a
+   * later timestamp than sequenced rows that follow it. Draining messages
+   * against a clock that can go backwards would attach their marks to the
+   * wrong `seq`, so drain against the high-water mark instead of the raw
+   * value.
+   */
+  let drainedThrough: string | null = null;
+
   for (const activity of input.activities) {
-    drainMessagesUpTo(activity.createdAt);
-    if (startedAt === undefined) startedAt = activity.createdAt;
-    endedAt = activity.createdAt;
+    if (drainedThrough === null || compareIso(activity.createdAt, drainedThrough) > 0) {
+      drainedThrough = activity.createdAt;
+    }
+    drainMessagesUpTo(drainedThrough);
 
     if (activity.kind === "context-compaction") {
       marks.push({ seq: events.length, type: "compaction" });
@@ -136,6 +147,12 @@ export function buildTrace(input: TraceProjectionInput): Trace {
 
     const payload = asPayload(activity.payload);
     if (!includedByLens(payload, input.lens, adapter)) continue;
+
+    // Bounds describe the trace being returned, so they follow the lens: an
+    // `agent:<id>` lens must span its own subtree, not the whole thread, or
+    // every duration derived from it is wrong.
+    if (startedAt === undefined) startedAt = activity.createdAt;
+    endedAt = activity.createdAt;
 
     if (activity.kind === "tool.denied") {
       const denial = adaptDenial(activity.payload);

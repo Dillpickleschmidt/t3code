@@ -51,7 +51,7 @@ export class MindwalkSnapshotService extends Context.Service<
 >()("t3/mindwalk/MindwalkSnapshot/MindwalkSnapshotService") {}
 
 interface CacheEntry {
-  readonly activityCount: number;
+  readonly fingerprint: string;
   readonly snapshot: MindwalkSnapshot;
 }
 
@@ -91,17 +91,23 @@ export const make = Effect.gen(function* () {
     const lens = parseLens(lensParam);
     const cacheKey = `${threadId}:${lensParam ?? "main"}`;
 
-    const activityCount = yield* activities.countByThreadId({ threadId });
-    const cached = cache.get(cacheKey);
-    if (cached && cached.activityCount === activityCount) {
-      yield* Effect.annotateCurrentSpan({ "mindwalk.cache": "hit" });
-      return Option.some(cached.snapshot);
-    }
-
+    // Fingerprint the rows themselves rather than an activity count. A count
+    // cannot see two things: user messages, which `buildTrace` also reads, and
+    // in-place rewrites, since `upsert` is ON CONFLICT DO UPDATE and can change
+    // a row's kind or payload without changing how many there are. Fetching
+    // both row sets first costs one indexed query on a hit, against a build
+    // that reads every file in the repository.
     const [traceRows, messageRows] = yield* Effect.all([
       activities.listByThreadIdAndKinds({ threadId, kinds: [...TRACE_ACTIVITY_KINDS] }),
       messages.listByThreadId({ threadId }),
     ]);
+
+    const fingerprint = fingerprintRows(traceRows, messageRows);
+    const cached = cache.get(cacheKey);
+    if (cached && cached.fingerprint === fingerprint) {
+      yield* Effect.annotateCurrentSpan({ "mindwalk.cache": "hit" });
+      return Option.some(cached.snapshot);
+    }
 
     const trace = buildTrace({
       threadId,
@@ -132,7 +138,7 @@ export const make = Effect.gen(function* () {
       trace: finalizeTrace(trace, citymap),
       citymap,
     };
-    cache.set(cacheKey, { activityCount, snapshot });
+    cache.set(cacheKey, { fingerprint, snapshot });
     evictOldest(cache);
     yield* Effect.annotateCurrentSpan({
       "mindwalk.cache": "miss",
@@ -265,4 +271,39 @@ function evictOldest(cache: Map<string, CacheEntry>): void {
     if (oldest.done === true) break;
     cache.delete(oldest.value);
   }
+}
+
+/**
+ * A cheap content fingerprint over the two row sets `buildTrace` consumes.
+ *
+ * Covers inserts, deletes, reordering, and rewrites — including payload-only
+ * ones, which `upsert`'s ON CONFLICT DO UPDATE makes possible without moving
+ * the row count. Serialising each payload costs milliseconds on the largest
+ * thread in the store, against a miss that reads every file in the repository.
+ */
+function fingerprintRows(
+  traceRows: ReadonlyArray<{
+    readonly activityId: string;
+    readonly kind: string;
+    readonly sequence?: number | undefined;
+    readonly createdAt: string;
+    readonly payload: unknown;
+  }>,
+  messageRows: ReadonlyArray<{ readonly messageId: string; readonly createdAt: string }>,
+): string {
+  let hash = 0x811c9dc5;
+  const mix = (value: string) => {
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    hash ^= 0x7c;
+    hash = Math.imul(hash, 0x01000193);
+  };
+  for (const row of traceRows) {
+    mix(`${row.activityId}|${row.kind}|${row.sequence ?? ""}|${row.createdAt}`);
+    mix(JSON.stringify(row.payload) ?? "");
+  }
+  for (const row of messageRows) mix(`${row.messageId}|${row.createdAt}`);
+  return `${traceRows.length}:${messageRows.length}:${(hash >>> 0).toString(36)}`;
 }
