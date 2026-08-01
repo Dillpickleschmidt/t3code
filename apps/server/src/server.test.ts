@@ -80,6 +80,7 @@ import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CitymapBuilder from "./citymap/CitymapBuilder.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as Keybindings from "./keybindings.ts";
+import * as MindwalkSnapshot from "./mindwalk/MindwalkSnapshot.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import { OrchestrationListenerCallbackError } from "./orchestration/Errors.ts";
@@ -350,6 +351,7 @@ const buildAppUnderTest = (options?: {
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"]>;
     checkpointDiffQuery?: Partial<CheckpointDiffQuery.CheckpointDiffQuery["Service"]>;
     citymapBuilder?: Partial<CitymapBuilder.CitymapBuilder["Service"]>;
+    mindwalkSnapshotService?: Partial<MindwalkSnapshot.MindwalkSnapshotService["Service"]>;
     browserTraceCollector?: Partial<BrowserTraceCollector.BrowserTraceCollector["Service"]>;
     serverLifecycleEvents?: Partial<ServerLifecycleEvents.ServerLifecycleEvents["Service"]>;
     serverRuntimeStartup?: Partial<ServerRuntimeStartup.ServerRuntimeStartup["Service"]>;
@@ -773,6 +775,10 @@ const buildAppUnderTest = (options?: {
                 layout: { algorithm: "squarified-treemap-v1", weight: "" },
               }),
             ...options?.layers?.citymapBuilder,
+          }),
+          Layer.mock(MindwalkSnapshot.MindwalkSnapshotService)({
+            getSnapshot: () => Effect.succeed(Option.none()),
+            ...options?.layers?.mindwalkSnapshotService,
           }),
         ),
       ),
