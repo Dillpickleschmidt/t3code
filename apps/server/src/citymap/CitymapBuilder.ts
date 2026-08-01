@@ -72,10 +72,14 @@ export class CitymapBuildError extends Schema.TaggedErrorClass<CitymapBuildError
   "CitymapBuildError",
   {
     root: Schema.String,
-    detail: Schema.String,
-    cause: Schema.optional(Schema.Defect()),
+    operation: Schema.Literals(["listWorkspaceFiles", "readDirectory"]),
+    cause: Schema.Defect(),
   },
-) {}
+) {
+  override get message(): string {
+    return `Citymap build failed during "${this.operation}" for ${this.root}.`;
+  }
+}
 
 export class CitymapBuilder extends Context.Service<
   CitymapBuilder,
@@ -113,8 +117,8 @@ export const make = Effect.gen(function* () {
    */
   const inFlight = new Map<string, Deferred.Deferred<Citymap, CitymapBuildError>>();
 
-  const failBuild = (root: string, detail: string) => (cause: unknown) =>
-    new CitymapBuildError({ root, detail, cause });
+  const failBuild = (root: string, operation: CitymapBuildError["operation"]) => (cause: unknown) =>
+    new CitymapBuildError({ root, operation, cause });
 
   /**
    * The tracked-and-untracked file list, exactly as mindwalk asks git for it.
@@ -128,7 +132,7 @@ export const make = Effect.gen(function* () {
     if (handle) {
       const listed = yield* handle
         .listWorkspaceFiles(root)
-        .pipe(Effect.mapError(failBuild(root, "Failed to list workspace files.")));
+        .pipe(Effect.mapError(failBuild(root, "listWorkspaceFiles")));
       if (listed.paths.length > 0) {
         return listed.paths;
       }
@@ -142,9 +146,15 @@ export const make = Effect.gen(function* () {
     depth: number,
   ): Effect.fn.Return<Array<string>, CitymapBuildError> {
     if (depth > FALLBACK_WALK_MAX_DEPTH) return [];
+    const realRoot = yield* fileSystem
+      .realPath(root)
+      .pipe(Effect.orElseSucceed(() => path.resolve(root)));
+    // Go's WalkDir propagates walk errors rather than skipping the directory,
+    // and an empty citymap is indistinguishable from an empty repository, so a
+    // permission or IO failure must not be cached as a valid result.
     const entries = yield* fileSystem
       .readDirectory(directory)
-      .pipe(Effect.orElseSucceed(() => [] as Array<string>));
+      .pipe(Effect.mapError(failBuild(root, "readDirectory")));
 
     const collected: Array<string> = [];
     for (const entry of entries.sort()) {
@@ -153,6 +163,12 @@ export const make = Effect.gen(function* () {
       if (!info) continue;
       if (info.type === "Directory") {
         if (FALLBACK_WALK_SKIP_DIRECTORIES.has(entry)) continue;
+        // `stat` follows symlinks, so a link to a directory would otherwise be
+        // descended and could collect paths outside the repository. Go's
+        // WalkDir uses lstat semantics and never descends a symlink; match that
+        // by confining traversal to the real root.
+        const real = yield* fileSystem.realPath(absolute).pipe(Effect.orElseSucceed(() => null));
+        if (real === null || (real !== realRoot && !real.startsWith(realRoot + path.sep))) continue;
         collected.push(...(yield* fallbackWalk(root, absolute, depth + 1)));
         continue;
       }
@@ -250,10 +266,14 @@ export const make = Effect.gen(function* () {
     const cacheKey = `${repoState.commit ?? ""}:${repoState.dirty}`;
     const now = yield* Clock.currentTimeMillis;
     const cached = cache.get(root);
+    // A clean git tree is pinned by its commit, so it can be cached until
+    // evicted. A dirty tree cannot be keyed precisely, and a non-git root has
+    // no fingerprint at all, so both fall back to the TTL.
+    const pinnedByCommit = repoState.commit !== null && !repoState.dirty;
     if (
       cached &&
       cached.key === cacheKey &&
-      (!repoState.dirty || now - cached.builtAt < DIRTY_CACHE_TTL_MS)
+      (pinnedByCommit || now - cached.builtAt < DIRTY_CACHE_TTL_MS)
     ) {
       yield* Effect.annotateCurrentSpan({ "citymap.cache": "hit" });
       return cached.citymap;
@@ -263,13 +283,16 @@ export const make = Effect.gen(function* () {
     // Claiming is synchronous — `makeUnsafe` and the `set` below leave no
     // yield point between the lookup and the claim — so two fibers arriving
     // together cannot both become the builder.
-    const running = inFlight.get(root);
+    // Keyed by root *and* state: a caller that observed a newer commit must
+    // not be handed a citymap built for the older one.
+    const flightKey = `${root}:${cacheKey}`;
+    const running = inFlight.get(flightKey);
     if (running) {
       yield* Effect.annotateCurrentSpan({ "citymap.cache": "joined" });
       return yield* Deferred.await(running);
     }
     const deferred = Deferred.makeUnsafe<Citymap, CitymapBuildError>();
-    inFlight.set(root, deferred);
+    inFlight.set(flightKey, deferred);
 
     return yield* Effect.gen(function* () {
       const relativePaths = yield* listFiles(root, handle?.driver ?? null);
@@ -301,7 +324,7 @@ export const make = Effect.gen(function* () {
         Deferred.done(deferred, exit).pipe(
           Effect.andThen(
             Effect.sync(() => {
-              inFlight.delete(root);
+              inFlight.delete(flightKey);
             }),
           ),
         ),

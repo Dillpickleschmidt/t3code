@@ -10,14 +10,14 @@ import {
   requireEnvironmentScope,
 } from "../auth/http.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { CitymapBuilder } from "./CitymapBuilder.ts";
+import * as CitymapBuilder from "./CitymapBuilder.ts";
 
 export const citymapHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
   "citymap",
   Effect.fnUntraced(function* (handlers) {
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
-    const citymapBuilder = yield* CitymapBuilder;
+    const citymapBuilder = yield* CitymapBuilder.CitymapBuilder;
 
     return handlers.handle(
       "threadCitymap",
@@ -27,7 +27,11 @@ export const citymapHttpApiLayer = HttpApiBuilder.group(
 
         const context = yield* projectionSnapshotQuery
           .getThreadCheckpointContext(args.params.threadId)
-          .pipe(Effect.catch((cause) => failEnvironmentInternal("citymap_build_failed", cause)));
+          .pipe(
+            Effect.catch((cause) =>
+              failEnvironmentInternal("orchestration_thread_snapshot_failed", cause),
+            ),
+          );
         if (Option.isNone(context)) {
           return yield* failEnvironmentNotFound("thread_not_found");
         }
