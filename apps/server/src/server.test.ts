@@ -77,6 +77,7 @@ import * as HttpResponseCompression from "./httpCompression/HttpResponseCompress
 import { makeRoutesLayer } from "./server.ts";
 import { resolveAvailableEditorsForConfig } from "./ws.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
+import * as CitymapBuilder from "./citymap/CitymapBuilder.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
@@ -348,6 +349,7 @@ const buildAppUnderTest = (options?: {
     orchestrationEngine?: Partial<OrchestrationEngine.OrchestrationEngineService["Service"]>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"]>;
     checkpointDiffQuery?: Partial<CheckpointDiffQuery.CheckpointDiffQuery["Service"]>;
+    citymapBuilder?: Partial<CitymapBuilder.CitymapBuilder["Service"]>;
     browserTraceCollector?: Partial<BrowserTraceCollector.BrowserTraceCollector["Service"]>;
     serverLifecycleEvents?: Partial<ServerLifecycleEvents.ServerLifecycleEvents["Service"]>;
     serverRuntimeStartup?: Partial<ServerRuntimeStartup.ServerRuntimeStartup["Service"]>;
@@ -743,23 +745,36 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(CheckpointDiffQuery.CheckpointDiffQuery)({
-          getTurnDiff: () =>
-            Effect.succeed({
-              threadId: defaultThreadId,
-              fromTurnCount: 0,
-              toTurnCount: 0,
-              diff: "",
-            }),
-          getFullThreadDiff: () =>
-            Effect.succeed({
-              threadId: defaultThreadId,
-              fromTurnCount: 0,
-              toTurnCount: 0,
-              diff: "",
-            }),
-          ...options?.layers?.checkpointDiffQuery,
-        }),
+        Layer.mergeAll(
+          Layer.mock(CheckpointDiffQuery.CheckpointDiffQuery)({
+            getTurnDiff: () =>
+              Effect.succeed({
+                threadId: defaultThreadId,
+                fromTurnCount: 0,
+                toTurnCount: 0,
+                diff: "",
+              }),
+            getFullThreadDiff: () =>
+              Effect.succeed({
+                threadId: defaultThreadId,
+                fromTurnCount: 0,
+                toTurnCount: 0,
+                diff: "",
+              }),
+            ...options?.layers?.checkpointDiffQuery,
+          }),
+          Layer.mock(CitymapBuilder.CitymapBuilder)({
+            buildForRoot: (root) =>
+              Effect.succeed({
+                version: 1,
+                repo: { root, dirty: false, generatedAt: "1970-01-01T00:00:00.000Z" },
+                files: [],
+                dirs: [],
+                layout: { algorithm: "squarified-treemap-v1", weight: "" },
+              }),
+            ...options?.layers?.citymapBuilder,
+          }),
+        ),
       ),
     );
 
@@ -1573,6 +1588,90 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ipAddress: "127.0.0.1",
         userAgent: "undici",
       });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves a thread's citymap from its worktree, gzipped", () =>
+    Effect.gen(function* () {
+      const builtRoots: Array<string> = [];
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getThreadCheckpointContext: () =>
+              Effect.succeed(
+                Option.some({
+                  threadId: defaultThreadId,
+                  projectId: defaultProjectId,
+                  workspaceRoot: "/projects/repo",
+                  worktreePath: "/projects/repo-worktree",
+                  checkpoints: [],
+                }),
+              ),
+          },
+          citymapBuilder: {
+            buildForRoot: (root) => {
+              builtRoots.push(root);
+              return Effect.succeed({
+                version: 1,
+                repo: { root, dirty: false, generatedAt: "1970-01-01T00:00:00.000Z" },
+                files: Array.from({ length: 40 }, (_, index) => ({
+                  id: index,
+                  path: `src/module-${index}/index.ts`,
+                  dir: `src/module-${index}`,
+                  lines: index,
+                  bytes: index * 32,
+                  lang: "typescript",
+                  rect: { x: index, z: index, w: 1, d: 1 },
+                  ghost: false,
+                })),
+                dirs: [],
+                layout: { algorithm: "squarified-treemap-v1", weight: "sqrt(x)" },
+              });
+            },
+          },
+        },
+      });
+
+      const url = yield* getHttpServerUrl(`/api/citymap/threads/${defaultThreadId}`);
+      const response = yield* fetchEffect(url, {
+        headers: {
+          cookie: yield* getAuthenticatedSessionCookieHeader(),
+          "accept-encoding": "gzip",
+        },
+      });
+      const body = yield* responseJsonEffect<{ version: number; files: ReadonlyArray<unknown> }>(
+        response,
+      );
+
+      assert.equal(response.status, 200);
+      // Citymaps are too big for the websocket, so they ride HTTP and gzip.
+      assert.equal(response.headers["content-encoding"], "gzip");
+      // The thread ran in a worktree, so that is the tree it must map.
+      assert.deepEqual(builtRoots, ["/projects/repo-worktree"]);
+      assert.equal(body.version, 1);
+      assert.equal(body.files.length, 40);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("returns 404 for a citymap request against an unknown thread", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const response = yield* HttpClient.get(`/api/citymap/threads/${defaultThreadId}`, {
+        headers: { cookie: yield* getAuthenticatedSessionCookieHeader() },
+      });
+
+      assert.equal(response.status, 404);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects an unauthenticated citymap request", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const response = yield* HttpClient.get(`/api/citymap/threads/${defaultThreadId}`);
+
+      assert.equal(response.status, 401);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
