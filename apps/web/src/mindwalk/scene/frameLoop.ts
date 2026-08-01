@@ -18,6 +18,17 @@
 //
 // Deliberately not React-aware: the scenes are imperative three.js, so the
 // loop is owned by the mount effect and poked from the data effects.
+/**
+ * How long the arrival drift is allowed to run.
+ *
+ * Mindwalk auto-rotates the camera until the first interaction, which on a
+ * view you open and never touch is unbounded motion on a parked, visible
+ * host — the case AGENTS.md names. Bounding it keeps the effect and caps the
+ * cost: at `autoRotateSpeed = -0.5` (a full orbit in ~120s) this is roughly
+ * 18 degrees, enough parallax to read the scene as 3D.
+ */
+export const ATTRACT_DRIFT_MS = 6000;
+
 export class FrameLoop {
   private frame: number | null = null;
   /** a repaint is owed: something changed that the last frame did not show */
