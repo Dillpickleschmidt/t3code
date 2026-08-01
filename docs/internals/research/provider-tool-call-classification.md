@@ -21,8 +21,8 @@ All `file:line` citations are repo-relative and were read directly from source i
    `data.tool` + `data.state`. A classifier written against Claude's shape reads `undefined` on
    every other provider. See §2.
 3. **Codex cannot distinguish reads at the item level at all** — it has no read/grep/glob tool; the
-   agent shells out and everything arrives as `command_execution`. But Codex *already pre-parses the
-   shell command* into `commandActions[] : { type: "read" | "listFiles" | "search", path, query }`
+   agent shells out and everything arrives as `command_execution`. But Codex _already pre-parses the
+   shell command_ into `commandActions[] : { type: "read" | "listFiles" | "search", path, query }`
    (`packages/effect-codex-app-server/src/_generated/schema.gen.ts:14494-14508`), and the adapter
    throws that away. This is the single highest-leverage fix in the whole ticket: it turns "parse
    shell strings" into "read a field". See §3 and §4.
@@ -30,7 +30,7 @@ All `file:line` citations are repo-relative and were read directly from source i
    (`apps/server/src/provider/acp/AcpCoreRuntimeEvents.ts:55-57`). A codebase grep is
    indistinguishable from a web fetch by `itemType`. `kind: "read"` falls through to
    `dynamic_tool_call`. Both are recoverable from `data.kind`, which happens to be one of the six
-   whitelisted keys — so Cursor/Grok are the *best-off* providers post-projection.
+   whitelisted keys — so Cursor/Grok are the _best-off_ providers post-projection.
 5. **`truncateDetail`'s 180-char cap is a non-issue.** It is `(value: string) => string`
    (`apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts:203-205`) and is applied only
    to `detail` / `summary` / `message` strings, never to `data`. See §5.
@@ -57,7 +57,7 @@ There is no `file_read` and no `file_search` member. `isToolLifecycleItemType`
 (`packages/contracts/src/providerRuntime.ts:117-119`) gates which runtime events become activities
 at all, so adding a new member is a contract change touching every adapter plus both clients — out
 of scope here; this document assumes the taxonomy stays fixed and classification happens
-*downstream* from `data`.
+_downstream_ from `data`.
 
 `data` is typed open at every hop, which is what makes downstream recovery possible:
 
@@ -78,10 +78,10 @@ Claude is the only adapter that classifies on a **tool name string** and the onl
 
 Emit sites (three, all with `data`):
 
-| Event | Line | `data` shape |
-|---|---|---|
-| `item.started` | `ClaudeAdapter.ts:2201-2204` | `{ toolName, input }` |
-| `item.updated` (input streaming) | `ClaudeAdapter.ts:2208-2211` | `{ toolName, input }` |
+| Event                                      | Line                                                      | `data` shape                  |
+| ------------------------------------------ | --------------------------------------------------------- | ----------------------------- |
+| `item.started`                             | `ClaudeAdapter.ts:2201-2204`                              | `{ toolName, input }`         |
+| `item.updated` (input streaming)           | `ClaudeAdapter.ts:2208-2211`                              | `{ toolName, input }`         |
 | `item.updated` + `item.completed` (result) | `ClaudeAdapter.ts:2361-2365`, used at `:2381` and `:2433` | `{ toolName, input, result }` |
 
 `toolName` is the raw upstream block name, unmodified: `const toolName = block.name;`
@@ -92,37 +92,37 @@ Emit sites (three, all with `data`):
 Classification is `classifyToolItemType` (`ClaudeAdapter.ts:596-638`), an ordered `includes()`
 ladder ending in `return "dynamic_tool_call";` at `:637`.
 
-| Tool name | Matched branch | itemType | Path in `input` |
-|---|---|---|---|
-| `Read` | none | `dynamic_tool_call` (`:637`) | `input.file_path` — **UNVERIFIED**, see note |
-| `Grep` | none | `dynamic_tool_call` (`:637`) | `input.path` (search root) + `input.pattern` (query) — verified by fixture, see below |
-| `Glob` | none | `dynamic_tool_call` (`:637`) | `input.path` (search root) + `input.pattern` — **UNVERIFIED** |
-| `Edit` / `Write` / `MultiEdit` | `includes("edit"｜"write")` (`:617-627`) | `file_change` | `input.file_path` — **UNVERIFIED** |
-| `NotebookEdit` | `includes("edit")` (`:618`) | `file_change` | notebook path — **UNVERIFIED** |
-| `Bash` / `BashOutput` / `KillShell` | `includes("bash")` (`:610`) | `command_execution` | `input.command` (shell string only) |
-| `Task` / anything containing `agent` | `:598-608` | `collab_agent_tool_call` | n/a |
-| `WebSearch` / `WebFetch`* | `includes("websearch"｜"web search")` (`:631`) | `web_search` (`WebFetch` → falls through to `dynamic_tool_call`) | n/a |
-| `mcp__*` | `includes("mcp")` (`:628`) | `mcp_tool_call` | server-specific |
-| `TodoWrite` | `includes("write")` (`:619`) | `file_change` (misclassification) | n/a — also drives `turn.plan.updated` at `:2221-2229` |
+| Tool name                            | Matched branch                                 | itemType                                                         | Path in `input`                                                                       |
+| ------------------------------------ | ---------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `Read`                               | none                                           | `dynamic_tool_call` (`:637`)                                     | `input.file_path` — **UNVERIFIED**, see note                                          |
+| `Grep`                               | none                                           | `dynamic_tool_call` (`:637`)                                     | `input.path` (search root) + `input.pattern` (query) — verified by fixture, see below |
+| `Glob`                               | none                                           | `dynamic_tool_call` (`:637`)                                     | `input.path` (search root) + `input.pattern` — **UNVERIFIED**                         |
+| `Edit` / `Write` / `MultiEdit`       | `includes("edit"｜"write")` (`:617-627`)       | `file_change`                                                    | `input.file_path` — **UNVERIFIED**                                                    |
+| `NotebookEdit`                       | `includes("edit")` (`:618`)                    | `file_change`                                                    | notebook path — **UNVERIFIED**                                                        |
+| `Bash` / `BashOutput` / `KillShell`  | `includes("bash")` (`:610`)                    | `command_execution`                                              | `input.command` (shell string only)                                                   |
+| `Task` / anything containing `agent` | `:598-608`                                     | `collab_agent_tool_call`                                         | n/a                                                                                   |
+| `WebSearch` / `WebFetch`\*           | `includes("websearch"｜"web search")` (`:631`) | `web_search` (`WebFetch` → falls through to `dynamic_tool_call`) | n/a                                                                                   |
+| `mcp__*`                             | `includes("mcp")` (`:628`)                     | `mcp_tool_call`                                                  | server-specific                                                                       |
+| `TodoWrite`                          | `includes("write")` (`:619`)                   | `file_change` (misclassification)                                | n/a — also drives `turn.plan.updated` at `:2221-2229`                                 |
 
 `Grep`'s input shape is confirmed by an in-repo fixture, which is a primary source for the wire
 shape as T3 actually observes it — `apps/server/src/provider/Layers/ClaudeAdapter.test.ts:1190-1197`:
 
 ```ts
-        assert.deepEqual(toolInputUpdated.payload.data, {
-          toolName: "Grep",
-          input: {
-            pattern: "foo",
-            path: "src",
-          },
-        });
+assert.deepEqual(toolInputUpdated.payload.data, {
+  toolName: "Grep",
+  input: {
+    pattern: "foo",
+    path: "src",
+  },
+});
 ```
 
 **UNVERIFIED — `Read`/`Edit`/`Write` input key name.** `node_modules` is not installed in this
 worktree, so `@anthropic-ai/claude-agent-sdk`'s tool-input types could not be read. Claude Code's
 documented shape is snake_case `file_path`, and the one `Read` fixture in the repo
 (`ClaudeAdapter.test.ts:2180`, `input: { path: "a.ts" }`) is hand-written and does **not** prove the
-real key. What *is* verified and load-bearing:
+real key. What _is_ verified and load-bearing:
 
 ```
 $ grep -rn "file_path" apps/server/src packages/shared/src packages/contracts/src
@@ -134,15 +134,15 @@ $ grep -rn "file_path" apps/server/src packages/shared/src packages/contracts/sr
 (`apps/server/src/orchestration/ActivityPayloadProjection.ts:54-59`,
 `packages/shared/src/toolActivity.ts:112`). So if Claude really does send `file_path`, then today:
 
-- a Claude **`Grep`** contributes its *search root* to `files` (via `input.path`), and
+- a Claude **`Grep`** contributes its _search root_ to `files` (via `input.path`), and
 - a Claude **`Edit`/`Read`** contributes **nothing** — the actual touched file is invisible.
 
 That inversion is worth confirming against a live capture before building on it. It is cheap to
 settle: log one `Edit` activity's `payload.data.input` keys.
 
 `isReadOnlyToolName` (`ClaudeAdapter.ts:640-650`) already encodes exactly the read/search predicate
-this ticket wants — but it is only consumed by `classifyRequestType` (`:652-662`) for *permission
-prompts*, never for item typing:
+this ticket wants — but it is only consumed by `classifyRequestType` (`:652-662`) for _permission
+prompts_, never for item typing:
 
 ```ts
 function isReadOnlyToolName(toolName: string): boolean {
@@ -158,7 +158,7 @@ function isReadOnlyToolName(toolName: string): boolean {
 }
 ```
 
-Note it does not separate *read* from *search* — both collapse to `file_read_approval`. A
+Note it does not separate _read_ from _search_ — both collapse to `file_read_approval`. A
 mindwalk-grade classifier needs them split; reuse the predicate's vocabulary, not its return type.
 
 ### 2.2 Codex — `apps/server/src/provider/Layers/CodexAdapter.ts`
@@ -181,15 +181,15 @@ notification.params;`) and `:898`. So the shape is
 `data = { threadId, turnId, startedAtMs|completedAtMs, item: <raw ThreadItem> }`. Pinned by
 `apps/server/src/provider/Layers/CodexAdapter.test.ts:597-612`.
 
-| Codex `item.type` | itemType (`:218-237`) | tool-name-ish field | Path location |
-|---|---|---|---|
-| `commandExecution` | `command_execution` (`:224`) | none | `data.item.command` (shell string); structured paths in `data.item.commandActions[]` — **ignored by the adapter** |
-| `fileChange` | `file_change` (`:225-226`) | none | `data.item.changes[i].path` (`schema.gen.ts:14554-14558`) |
-| `mcpToolCall` | `mcp_tool_call` (`:227`) | `data.item.server` + `data.item.tool` | server-specific, in `data.item.arguments` |
-| `dynamicToolCall` | `dynamic_tool_call` (`:228`) | `data.item.tool` (+ `namespace`) | in `data.item.arguments` |
-| `collabAgentToolCall` | `collab_agent_tool_call` (`:229`) | `data.item.tool` | n/a |
-| `webSearch` | `web_search` (`:230`) | none | n/a (`data.item.query`) |
-| `imageView` | `image_view` (`:231`) | none | `data.item.path` |
+| Codex `item.type`     | itemType (`:218-237`)             | tool-name-ish field                   | Path location                                                                                                     |
+| --------------------- | --------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `commandExecution`    | `command_execution` (`:224`)      | none                                  | `data.item.command` (shell string); structured paths in `data.item.commandActions[]` — **ignored by the adapter** |
+| `fileChange`          | `file_change` (`:225-226`)        | none                                  | `data.item.changes[i].path` (`schema.gen.ts:14554-14558`)                                                         |
+| `mcpToolCall`         | `mcp_tool_call` (`:227`)          | `data.item.server` + `data.item.tool` | server-specific, in `data.item.arguments`                                                                         |
+| `dynamicToolCall`     | `dynamic_tool_call` (`:228`)      | `data.item.tool` (+ `namespace`)      | in `data.item.arguments`                                                                                          |
+| `collabAgentToolCall` | `collab_agent_tool_call` (`:229`) | `data.item.tool`                      | n/a                                                                                                               |
+| `webSearch`           | `web_search` (`:230`)             | none                                  | n/a (`data.item.query`)                                                                                           |
+| `imageView`           | `image_view` (`:231`)             | none                                  | `data.item.path`                                                                                                  |
 
 **There is no read, grep, glob or list tool in Codex's item union.** The only read-flavoured
 protocol surface is the approval RPC `item/fileRead/requestApproval` → `file_read_approval`
@@ -200,12 +200,19 @@ protocol surface is the approval RPC `item/fileRead/requestApproval` → `file_r
 
 ```ts
 export type V2ItemStartedNotification__CommandAction =
-  | { readonly command: string; readonly name: string;
+  | {
+      readonly command: string;
+      readonly name: string;
       readonly path: V2ItemStartedNotification__AbsolutePathBuf;
-      readonly type: "read"; }
+      readonly type: "read";
+    }
   | { readonly command: string; readonly path?: string | null; readonly type: "listFiles" }
-  | { readonly command: string; readonly path?: string | null;
-      readonly query?: string | null; readonly type: "search"; }
+  | {
+      readonly command: string;
+      readonly path?: string | null;
+      readonly query?: string | null;
+      readonly type: "search";
+    }
   | { readonly command: string; readonly type: "unknown" };
 ```
 
@@ -245,14 +252,14 @@ function canonicalItemTypeFromAcpToolKind(kind: string | undefined): ToolLifecyc
 }
 ```
 
-| ACP `kind` | itemType | Recovery |
-|---|---|---|
-| `execute` | `command_execution` | `data.command` (`AcpRuntimeModel.ts:337-339`) |
-| `edit` / `delete` / `move` | `file_change` | `data.locations[*].path`, else `data.rawInput.*` |
-| `search` | **`web_search`** — collides with web fetch | `data.kind === "search"` disambiguates; query in `data.rawInput.query｜pattern｜searchTerm` |
-| `fetch` | `web_search` | `data.kind === "fetch"` |
-| **`read`** | `dynamic_tool_call` (default) | **`data.kind === "read"`** + `data.locations[0].path` |
-| `think` / `switch_mode` / `other` / absent | `dynamic_tool_call` | — |
+| ACP `kind`                                 | itemType                                   | Recovery                                                                                    |
+| ------------------------------------------ | ------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `execute`                                  | `command_execution`                        | `data.command` (`AcpRuntimeModel.ts:337-339`)                                               |
+| `edit` / `delete` / `move`                 | `file_change`                              | `data.locations[*].path`, else `data.rawInput.*`                                            |
+| `search`                                   | **`web_search`** — collides with web fetch | `data.kind === "search"` disambiguates; query in `data.rawInput.query｜pattern｜searchTerm` |
+| `fetch`                                    | `web_search`                               | `data.kind === "fetch"`                                                                     |
+| **`read`**                                 | `dynamic_tool_call` (default)              | **`data.kind === "read"`** + `data.locations[0].path`                                       |
+| `think` / `switch_mode` / `other` / absent | `dynamic_tool_call`                        | —                                                                                           |
 
 `data` is built by `makeToolCallState` (`AcpRuntimeModel.ts:334-353`) and its complete key set is
 exactly `{ toolCallId, kind?, command?, rawInput?, rawOutput?, content?, locations? }`. Both
@@ -285,12 +292,12 @@ events belonging to interrupted turns (`GrokAdapter.ts:803-809`); Cursor does no
 entirely — `apps/server/src/provider/acp/AcpSessionRuntime.ts:929-940`:
 
 ```ts
-  if (next.status === "completed" || next.status === "failed") {
-    return true;
-  }
-  if (!next.detail) {
-    return false;
-  }
+if (next.status === "completed" || next.status === "failed") {
+  return true;
+}
+if (!next.detail) {
+  return false;
+}
 ```
 
 Since a `read` with no discoverable path yields no `detail`
@@ -312,17 +319,17 @@ with exactly one caller (`:901`).
               },
 ```
 
-| OpenCode tool | Matched literal | itemType | Path location |
-|---|---|---|---|
-| `read` | none | `dynamic_tool_call` (`:315`) | `data.state.input.<key>` — **UNVERIFIED** (`filePath` vs `path`) |
-| `grep` | none | `dynamic_tool_call` (`:315`) | `data.state.input.*` — **UNVERIFIED** |
-| `glob` | none | `dynamic_tool_call` (`:315`) | `data.state.input.*` — **UNVERIFIED** |
-| `list` | none | `dynamic_tool_call` (`:315`) | `data.state.input.*` — **UNVERIFIED** |
-| `bash` | `"bash"` (`:288`) | `command_execution` | `data.state.input.command` (shell string) |
-| `edit` / `write` / `patch` | `"edit"｜"write"｜"patch"` (`:291-296`) | `file_change` | `data.state.input.*` — **UNVERIFIED** |
-| `webfetch` | `"web"` (`:299`) | `web_search` (a fetch, not a search) | n/a |
-| `task` | `"task"` (`:309`) | `collab_agent_tool_call` | n/a |
-| `todowrite` | `"write"` (`:293`) | **`file_change`** (misclassification) | n/a |
+| OpenCode tool              | Matched literal                         | itemType                              | Path location                                                    |
+| -------------------------- | --------------------------------------- | ------------------------------------- | ---------------------------------------------------------------- |
+| `read`                     | none                                    | `dynamic_tool_call` (`:315`)          | `data.state.input.<key>` — **UNVERIFIED** (`filePath` vs `path`) |
+| `grep`                     | none                                    | `dynamic_tool_call` (`:315`)          | `data.state.input.*` — **UNVERIFIED**                            |
+| `glob`                     | none                                    | `dynamic_tool_call` (`:315`)          | `data.state.input.*` — **UNVERIFIED**                            |
+| `list`                     | none                                    | `dynamic_tool_call` (`:315`)          | `data.state.input.*` — **UNVERIFIED**                            |
+| `bash`                     | `"bash"` (`:288`)                       | `command_execution`                   | `data.state.input.command` (shell string)                        |
+| `edit` / `write` / `patch` | `"edit"｜"write"｜"patch"` (`:291-296`) | `file_change`                         | `data.state.input.*` — **UNVERIFIED**                            |
+| `webfetch`                 | `"web"` (`:299`)                        | `web_search` (a fetch, not a search)  | n/a                                                              |
+| `task`                     | `"task"` (`:309`)                       | `collab_agent_tool_call`              | n/a                                                              |
+| `todowrite`                | `"write"` (`:293`)                      | **`file_change`** (misclassification) | n/a                                                              |
 
 **The adapter never inspects tool input.** No `state.input`, `.filePath`, `.path`, `.pattern` access
 exists anywhere in the file; `part.state` is spread wholesale at `:916` and nothing destructures it.
@@ -342,35 +349,35 @@ must be settled from a live capture or the installed SDK types before writing ex
 
 ### 2.5 Cross-adapter summary of `data`
 
-| Provider | `data` shape | Tool name at | Input at | Structured path at |
-|---|---|---|---|---|
-| Claude | `{ toolName, input, result? }` (`ClaudeAdapter.ts:2361-2365`) | `data.toolName` | `data.input` | `data.input.<key>` (key name UNVERIFIED) |
-| Codex | verbatim notification `params` (`CodexAdapter.ts:492`) | `data.item.tool` (dynamic/MCP/collab only) | `data.item.arguments` | `data.item.changes[].path`; `data.item.commandActions[].path` |
-| Cursor | `{ toolCallId, kind?, command?, rawInput?, rawOutput?, content?, locations? }` (`AcpRuntimeModel.ts:334-353`) | **absent** | `data.rawInput` | `data.locations[].path` |
-| Grok | identical to Cursor | **absent** | `data.rawInput` | `data.locations[].path` |
-| OpenCode | `{ tool, state }` (`OpenCodeAdapter.ts:914-917`) | `data.tool` | `data.state.input` | `data.state.input.<key>` (UNVERIFIED) |
+| Provider | `data` shape                                                                                                  | Tool name at                               | Input at              | Structured path at                                            |
+| -------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | --------------------- | ------------------------------------------------------------- |
+| Claude   | `{ toolName, input, result? }` (`ClaudeAdapter.ts:2361-2365`)                                                 | `data.toolName`                            | `data.input`          | `data.input.<key>` (key name UNVERIFIED)                      |
+| Codex    | verbatim notification `params` (`CodexAdapter.ts:492`)                                                        | `data.item.tool` (dynamic/MCP/collab only) | `data.item.arguments` | `data.item.changes[].path`; `data.item.commandActions[].path` |
+| Cursor   | `{ toolCallId, kind?, command?, rawInput?, rawOutput?, content?, locations? }` (`AcpRuntimeModel.ts:334-353`) | **absent**                                 | `data.rawInput`       | `data.locations[].path`                                       |
+| Grok     | identical to Cursor                                                                                           | **absent**                                 | `data.rawInput`       | `data.locations[].path`                                       |
+| OpenCode | `{ tool, state }` (`OpenCodeAdapter.ts:914-917`)                                                              | `data.tool`                                | `data.state.input`    | `data.state.input.<key>` (UNVERIFIED)                         |
 
 ---
 
 ## 3. Which adapters genuinely cannot distinguish reads
 
-| Provider | Can distinguish read? | Why |
-|---|---|---|
-| **Claude** | **Yes, reliably.** | `data.toolName` is the raw upstream name; `"Read"` / `"Grep"` / `"Glob"` are exact strings. Recovering the *path* is the weak link, not the *kind*. |
-| **Cursor** | **Yes, reliably.** | `data.kind === "read"` is verbatim ACP. `"search"` is also explicit (though it lands in `web_search`). Path from `data.locations`, **if the agent sends them** — see caveat. |
-| **Grok** | **Yes, reliably.** | Same code path as Cursor, same guarantees. |
-| **OpenCode** | **Yes, in principle.** | `data.tool` is the raw name (`"read"`, `"grep"`, `"glob"`, `"list"`). But the *path* lives in an input shape that is undocumented in-repo and completely untested. Kind is certain; path is not. |
-| **Codex** | **No, not at the item level.** | Codex has no read/grep/glob tool. Every read and search is a shell invocation arriving as `command_execution`. There is no tool name to test. |
+| Provider     | Can distinguish read?          | Why                                                                                                                                                                                              |
+| ------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Claude**   | **Yes, reliably.**             | `data.toolName` is the raw upstream name; `"Read"` / `"Grep"` / `"Glob"` are exact strings. Recovering the _path_ is the weak link, not the _kind_.                                              |
+| **Cursor**   | **Yes, reliably.**             | `data.kind === "read"` is verbatim ACP. `"search"` is also explicit (though it lands in `web_search`). Path from `data.locations`, **if the agent sends them** — see caveat.                     |
+| **Grok**     | **Yes, reliably.**             | Same code path as Cursor, same guarantees.                                                                                                                                                       |
+| **OpenCode** | **Yes, in principle.**         | `data.tool` is the raw name (`"read"`, `"grep"`, `"glob"`, `"list"`). But the _path_ lives in an input shape that is undocumented in-repo and completely untested. Kind is certain; path is not. |
+| **Codex**    | **No, not at the item level.** | Codex has no read/grep/glob tool. Every read and search is a shell invocation arriving as `command_execution`. There is no tool name to test.                                                    |
 
 **The Codex caveat that rescues it.** Codex is the only adapter that genuinely cannot classify from
 tool identity — and it is also the only one that does not need to, because
 `data.item.commandActions[]` already carries `{ type: "read" | "listFiles" | "search", path, query }`
-per action (`schema.gen.ts:14494-14508`). So the honest statement is: *no adapter is fundamentally
-blind to reads*; Codex is blind by tool name but sighted by pre-parsed command action, and the
+per action (`schema.gen.ts:14494-14508`). So the honest statement is: _no adapter is fundamentally
+blind to reads_; Codex is blind by tool name but sighted by pre-parsed command action, and the
 adapter simply discards the field.
 
 **A caveat that cuts the other way for Cursor/Grok.** `locations` is optional in ACP and is
-populated by the *agent*, not by T3. No fixture anywhere in this repo uses `locations` (verified:
+populated by the _agent_, not by T3. No fixture anywhere in this repo uses `locations` (verified:
 `grep -rn "locations" apps/server/src/provider/Layers/{Cursor,Grok}Adapter.test.ts` → 0 hits; the
 only tool-call fixtures live in `apps/server/scripts/acp-mock-agent.ts` and use `kind: "read"`,
 `"search"`, `"other"` with no locations). **UNVERIFIED:** whether `cursor-agent` and `grok agent`
@@ -391,12 +398,12 @@ visualisation costs nothing but inherits its miss rate.
 
 ### Where this actually bites
 
-| Provider | Reads/searches routed through shell | Assessment |
-|---|---|---|
-| Codex | **~100%** | No read/grep/glob tool exists. Every single one. |
-| Claude | Minority | `Read`/`Grep`/`Glob` are first-class and strongly preferred by the model; `cat`/`rg`/`sed`/`head` via `Bash` still occur, typically for piping, counting, or multi-file sweeps. |
-| OpenCode | Minority | `read`/`grep`/`glob`/`list` are first-class built-ins; `bash` is used similarly to Claude. |
-| Cursor / Grok | Minority | `kind: "execute"` covers shell; `read`/`search` kinds are first-class. |
+| Provider      | Reads/searches routed through shell | Assessment                                                                                                                                                                      |
+| ------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Codex         | **~100%**                           | No read/grep/glob tool exists. Every single one.                                                                                                                                |
+| Claude        | Minority                            | `Read`/`Grep`/`Glob` are first-class and strongly preferred by the model; `cat`/`rg`/`sed`/`head` via `Bash` still occur, typically for piping, counting, or multi-file sweeps. |
+| OpenCode      | Minority                            | `read`/`grep`/`glob`/`list` are first-class built-ins; `bash` is used similarly to Claude.                                                                                      |
+| Cursor / Grok | Minority                            | `kind: "execute"` covers shell; `read`/`search` kinds are first-class.                                                                                                          |
 
 **I cannot quantify the minority-provider rates from source.** Doing so honestly requires counting
 `command_execution` activities whose shell string names a file against total file-touching
@@ -412,7 +419,7 @@ retains every full payload — so this is a SQL query away on any machine with a
 payload would be strictly worse in every dimension. **Recommendation: extend
 `projectCommandData`/the projection whitelist to pass `commandActions` through, and read it.** This
 converts Codex from the worst-supported provider to arguably the best — it is the only provider
-giving you a typed read/list/search discriminator *with* a path, produced by the agent's own
+giving you a typed read/list/search discriminator _with_ a path, produced by the agent's own
 sandbox-aware parser.
 
 **For the other four: no, not in v1.** The cost/benefit is bad:
@@ -425,7 +432,7 @@ sandbox-aware parser.
   user trusts a touch that never happened. Cheap-and-wrong is worse than nothing here.
 - The marginal gain is bounded by the minority share, which we haven't measured.
 
-**A narrow exception worth taking.** A conservative allowlist over the *first* token of the command
+**A narrow exception worth taking.** A conservative allowlist over the _first_ token of the command
 only — `cat`, `head`, `tail`, `less`, `bat`, `wc -l` for reads; `rg`, `grep`, `ag` for searches;
 `ls`, `fd`, `find` for globs — with a hard bail on any string containing `|`, `>`, `;`, `&&`, `$(`,
 or a backtick, would capture the common single-purpose invocation at near-zero false-positive risk
@@ -467,13 +474,13 @@ call sites pass a `detail` / `summary` / `message` / `description` / `title` str
 **Verdict: the 180-char cap does not affect `data` and needs no routing around.** It only matters if
 you were planning to parse paths out of `detail` — which you should not, for exactly this reason.
 
-### 5.2 `collectChangedFiles` (12 files / depth 4) — real, but the *enclosing* function is the actual problem
+### 5.2 `collectChangedFiles` (12 files / depth 4) — real, but the _enclosing_ function is the actual problem
 
 `apps/server/src/orchestration/ActivityPayloadProjection.ts:30-81`. Entry guard at `:36`
 (`if (depth > 4 || target.length >= 12) return;`), re-checked after each array element (`:42`) and
 each nested key (`:77`). It reads six path-like keys (`:54-59`) and recurses into ten whitelisted
 nested keys (`:61-72`): `item, result, input, data, changes, files, edits, patch, patches,
-operations`. Note `locations` is **not** in that list (it *is* in the parallel walker at
+operations`. Note `locations` is **not** in that list (it _is_ in the parallel walker at
 `packages/shared/src/toolActivity.ts:123`) — so Cursor/Grok `data.locations[].path` is **not**
 collected by `collectChangedFiles`. Nor is any snake_case key.
 
@@ -483,20 +490,30 @@ most for the port. `projectActivityPayload` **replaces `data` wholesale with a w
 (`ActivityPayloadProjection.ts:158-201`):
 
 ```ts
-  const projectedData: Record<string, unknown> = {};
-  const item = projectCommandData(data);
-  if (item) { projectedData.item = item; }
-  if ("command" in data) { projectedData.command = data.command; }
-  const changedFiles: string[] = [];
-  collectChangedFiles(data, changedFiles, new Set<string>(), 0);
-  if (changedFiles.length > 0) {
-    projectedData.files = changedFiles.map((path) => ({ path }));
-  }
-  if ("toolCallId" in data) { projectedData.toolCallId = data.toolCallId; }
-  if ("kind" in data) { projectedData.kind = data.kind; }
-  const rawOutput = projectRawOutput(data.rawOutput);
-  if (rawOutput) { projectedData.rawOutput = rawOutput; }
-  return { ...activity, payload: { ...payload, data: projectedData } };
+const projectedData: Record<string, unknown> = {};
+const item = projectCommandData(data);
+if (item) {
+  projectedData.item = item;
+}
+if ("command" in data) {
+  projectedData.command = data.command;
+}
+const changedFiles: string[] = [];
+collectChangedFiles(data, changedFiles, new Set<string>(), 0);
+if (changedFiles.length > 0) {
+  projectedData.files = changedFiles.map((path) => ({ path }));
+}
+if ("toolCallId" in data) {
+  projectedData.toolCallId = data.toolCallId;
+}
+if ("kind" in data) {
+  projectedData.kind = data.kind;
+}
+const rawOutput = projectRawOutput(data.rawOutput);
+if (rawOutput) {
+  projectedData.rawOutput = rawOutput;
+}
+return { ...activity, payload: { ...payload, data: projectedData } };
 ```
 
 The surviving keys are exactly **`item`** (itself narrowed by `projectCommandData` `:83-105` to only
@@ -511,9 +528,10 @@ Consequences per provider on the wire today:
   it probably captures Grep's search root while missing Edit's target.
 - Codex: `data.item` narrowed to command strings; `commandActions` **dropped**; `changes[].path`
   survives only via `files`.
-- Cursor/Grok: `data.kind` **survives** (`:186-188`) and `data.locations[].path` survives via `files`
-  only if the walker reaches it — it does, through the `data` → (array) recursion, since `locations`
-  entries are records with a `path` key at depth 2. `data.rawInput` **dropped**.
+- Cursor/Grok: `data.kind` **survives** (`:186-188`). `data.locations[].path` is **dropped**: the
+  root call is already `data`, and the loop descends only into the ten whitelisted nested keys, so
+  a top-level `locations` array is never traversed at all (§5.2). `data.rawInput` **dropped**.
+  Only `kind` survives — enough to classify the touch, not to name the file.
 - OpenCode: `data.tool` **dropped**, `data.state` **dropped**. Essentially nothing survives.
 
 **Where the stripping applies.** Only at the read/wire boundary — `apps/server/src/ws.ts:1266`
@@ -559,9 +577,9 @@ The full payload is retained in SQLite (`payload_json TEXT`, no size cap,
 - `classifyToolAction` (`:157-184`) returns `"command" | "read" | "file_change" | "search" | "other"`
   from `{ itemType, title, data }` — the shape this ticket asks for, minus the paths.
 - `extractPrimaryPath` / `collectPaths` (`:95-138`) walks `locations, item, input, result, rawInput,
-  data, changes` for `path, filePath, relativePath, filename, newPath, oldPath`, with
+data, changes` for `path, filePath, relativePath, filename, newPath, oldPath`, with
   `maybePathLike` (`:80-93`) filtering non-path strings.
-- It is already shared between web and mobile, and already runs on the *projected* payload.
+- It is already shared between web and mobile, and already runs on the _projected_ payload.
 
 `classifyToolAction`'s current heuristics are ACP-shaped (`kind === "read"`, `title === "read file"`)
 and therefore work for Cursor/Grok and nothing else. **The right move is to widen this function
@@ -613,13 +631,13 @@ dedupe on `itemId`.
 
 ### 6.3 Per-provider reliability notes to embed as doc comments
 
-| Provider | `kind` reliability | `paths` reliability | Notes |
-|---|---|---|---|
-| **Claude** | Exact — `data.toolName` is the upstream name | **At risk.** If the input key is `file_path`, no existing walker finds it, and `Read`/`Edit` paths are invisible. Confirm before shipping. | Also: `Grep`'s `input.path` is a *search root*, not a file. Emitting it as a touched file would paint whole directories. Treat `Grep`/`Glob` paths as scope hints, not touches — prefer paths from the tool *result*. |
-| **Codex** | **`none` until `commandActions` is whitelisted.** After that: exact for `read`/`listFiles`/`search`. | Exact (`commandActions[].path` is an `AbsolutePathBuf`). | `file_change` paths at `data.item.changes[].path` are exact today. The `command_execution` → read/search classification is entirely blocked on the projection change. |
-| **Cursor** | Exact via `data.kind` (survives projection). | **Unknown.** Depends on whether `cursor-agent` populates `locations`. No in-repo fixture uses it. | `kind: "search"` arrives as `itemType: "web_search"` — do **not** branch on `itemType` for search; branch on `kind` first and treat `itemType` as a fallback. |
-| **Grok** | Exact via `data.kind`. | **Unknown**, same as Cursor. | Additionally, Grok drops tool-call events for interrupted turns (`GrokAdapter.ts:803-809`), so an interrupted turn's touches are simply absent. |
-| **OpenCode** | Exact via `data.tool` — **but `data.tool` is dropped by the projection.** | **Unknown** — no SDK types, no test fixtures, zero in-repo evidence. | The worst-supported provider. Everything here needs a live capture first. |
+| Provider     | `kind` reliability                                                                                   | `paths` reliability                                                                                                                        | Notes                                                                                                                                                                                                                 |
+| ------------ | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Claude**   | Exact — `data.toolName` is the upstream name                                                         | **At risk.** If the input key is `file_path`, no existing walker finds it, and `Read`/`Edit` paths are invisible. Confirm before shipping. | Also: `Grep`'s `input.path` is a _search root_, not a file. Emitting it as a touched file would paint whole directories. Treat `Grep`/`Glob` paths as scope hints, not touches — prefer paths from the tool _result_. |
+| **Codex**    | **`none` until `commandActions` is whitelisted.** After that: exact for `read`/`listFiles`/`search`. | Exact (`commandActions[].path` is an `AbsolutePathBuf`).                                                                                   | `file_change` paths at `data.item.changes[].path` are exact today. The `command_execution` → read/search classification is entirely blocked on the projection change.                                                 |
+| **Cursor**   | Exact via `data.kind` (survives projection).                                                         | **Unknown.** Depends on whether `cursor-agent` populates `locations`. No in-repo fixture uses it.                                          | `kind: "search"` arrives as `itemType: "web_search"` — do **not** branch on `itemType` for search; branch on `kind` first and treat `itemType` as a fallback.                                                         |
+| **Grok**     | Exact via `data.kind`.                                                                               | **Unknown**, same as Cursor.                                                                                                               | Additionally, Grok drops tool-call events for interrupted turns (`GrokAdapter.ts:803-809`), so an interrupted turn's touches are simply absent.                                                                       |
+| **OpenCode** | Exact via `data.tool` — **but `data.tool` is dropped by the projection.**                            | **Unknown** — no SDK types, no test fixtures, zero in-repo evidence.                                                                       | The worst-supported provider. Everything here needs a live capture first.                                                                                                                                             |
 
 ### 6.4 Ordered next steps
 
@@ -652,7 +670,7 @@ Each verified by grep over the worktree, excluding `node_modules`:
 - `commandActions`: zero hits in adapter source; one hit in a test fixture
   (`apps/server/test/ActivityPayloadProjection.test.ts:79`).
 - `isReadOnlyToolName`: exists only at `ClaudeAdapter.ts:640`, used only at `:653` for approvals.
-- ACP `case "read":` for *item typing*: does not exist. The only `case "read":` in
+- ACP `case "read":` for _item typing_: does not exist. The only `case "read":` in
   `apps/server/src/provider/acp/` is `AcpCoreRuntimeEvents.ts:36`, inside the approval mapper.
 - No Cursor or Grok adapter test exercises a tool-call payload
   (`grep -n "rawInput\|locations\|toolCallId\|tool_call"` over both `.test.ts` files → 0 hits).
