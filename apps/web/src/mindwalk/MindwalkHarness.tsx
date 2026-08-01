@@ -25,10 +25,12 @@ export default function MindwalkHarness({ threadId }: { threadId: string }) {
   const [selectedPath, setSelectedPath] = useState<string | undefined>();
 
   useEffect(() => {
-    if (!threadId) return;
-    let cancelled = false;
+    // Clear first: losing the threadId must drop the previous citymap rather
+    // than leave it on screen behind the "pass a threadId" prompt.
     setCity(undefined);
     setError(undefined);
+    if (!threadId) return;
+    let cancelled = false;
     runPrimaryHttp(
       PrimaryEnvironmentHttpClient.pipe(
         Effect.flatMap((client) =>
