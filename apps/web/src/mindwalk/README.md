@@ -60,6 +60,20 @@ at rest — while putting every value on whatever axis T3 currently uses. One
 ratio serves both themes, since "toward the foreground" already means "more
 present" in either: it darkens on paper and lightens at night.
 
+That includes the two biggest meshes on the stage, the ground plane and the
+survey grid, which mindwalk declared inline as `#14171e` and friends. They are
+easy to miss and expensive to get wrong: the ground is six times the map's
+extent and mostly sits inside the fog, so a dark plane under a light sky is not
+a dark plane — it is a full-stage gradient wash. By day the ground is the paper
+itself and the gradient collapses to nothing.
+
+The columns' baked vertical shade is themed for the same reason. Mindwalk
+multiplies each column's touch colour from `0.34` at the base to `0.82` at the
+crest so glow pools at the top and falls off into the plain. Multiplying toward
+zero means "toward black", which only reads as falloff on an unlit stage; on
+paper it puts a dark smudge at the foot of everything. By day the columns are
+flat (`[1, 1]`) and the scene's own lighting does the shading.
+
 What stays declared is what encodes _meaning_ and has no T3 counterpart: the
 touch states, the timeline's action spectrum, and the mark colours. T3 has no
 token for "read but not edited".

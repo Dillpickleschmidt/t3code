@@ -427,13 +427,13 @@ export function CityScene({
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(size * 6, size * 6),
-      new THREE.MeshStandardMaterial({ color: "#14171e", roughness: 1 }),
+      new THREE.MeshStandardMaterial({ color: palette.ground, roughness: 1 }),
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.32;
     group.add(ground);
 
-    const grid = new THREE.GridHelper(size * 2.8, 46, "#20242e", "#1a1e27");
+    const grid = new THREE.GridHelper(size * 2.8, 46, palette.gridMajor, palette.gridMinor);
     (grid.material as THREE.Material).transparent = true;
     (grid.material as THREE.Material).opacity = 0.5;
     grid.position.y = -0.3;
@@ -494,7 +494,7 @@ export function CityScene({
 
     // attention terrain: unlit columns that grow out of the plain
     const terrain = new THREE.InstancedMesh(
-      attentionColumnGeometry(),
+      attentionColumnGeometry(palette.columnShade),
       new THREE.MeshBasicMaterial({ toneMapped: false, vertexColors: true }),
       city.files.length,
     );
@@ -719,14 +719,15 @@ export function CityScene({
 // Columns must read as phosphorescence, not paint: glow pools at the crest and
 // falls off into the plain. Vertex shade multiplies the per-instance touch
 // color; the top face sits under the side rims so edges catch the most light.
-function attentionColumnGeometry(): THREE.BoxGeometry {
+function attentionColumnGeometry(columnShade: readonly [number, number]): THREE.BoxGeometry {
+  const [base, crest] = columnShade;
   const geo = new THREE.BoxGeometry(1, 1, 1);
   const pos = geo.getAttribute("position");
   const normal = geo.getAttribute("normal");
   const shade = new Float32Array(pos.count * 3);
   for (let i = 0; i < pos.count; i++) {
     const t = pos.getY(i) + 0.5;
-    const glow = normal.getY(i) === 1 ? 0.82 : 0.34 + 0.66 * t * t;
+    const glow = normal.getY(i) === 1 ? crest : base + (crest - base) * t * t;
     shade.fill(glow, i * 3, i * 3 + 3);
   }
   geo.setAttribute("color", new THREE.BufferAttribute(shade, 3));

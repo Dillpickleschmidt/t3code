@@ -399,13 +399,13 @@ export function TreeScene({
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(size * 6, size * 6),
-      new THREE.MeshStandardMaterial({ color: "#14171e", roughness: 1 }),
+      new THREE.MeshStandardMaterial({ color: palette.ground, roughness: 1 }),
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.25;
     group.add(ground);
 
-    const grid = new THREE.GridHelper(size * 2.4, 40, "#1d222c", "#181c25");
+    const grid = new THREE.GridHelper(size * 2.4, 40, palette.gridMajor, palette.gridMinor);
     (grid.material as THREE.Material).transparent = true;
     (grid.material as THREE.Material).opacity = 0.4;
     grid.position.y = -0.24;
