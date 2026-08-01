@@ -86,24 +86,16 @@ function SurfaceMenuItem(props: {
   return <DisabledReasonTooltip reason={props.disabledReason} trigger={item} />;
 }
 
+// Browser is intentionally absent here: it is desktop-only, so on web this
+// card was permanently disabled. It remains available from the "+" menu.
 function RightPanelEmptyState(props: {
-  onAddBrowser: () => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
-  browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
 }) {
   const actions = [
-    {
-      label: "Browser",
-      description: "Open a local app or URL.",
-      icon: Globe2,
-      available: props.browserAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.browser,
-      onClick: props.onAddBrowser,
-    },
     {
       label: "Terminal",
       description: "Start a shell in this workspace.",
@@ -481,11 +473,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       <div className="flex min-h-0 flex-1 flex-col">
         {props.activeSurfaceId === null ? (
           <RightPanelEmptyState
-            onAddBrowser={props.onAddBrowser}
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
-            browserAvailable={props.browserAvailable}
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
           />
