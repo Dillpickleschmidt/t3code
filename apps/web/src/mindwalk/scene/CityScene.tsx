@@ -14,6 +14,7 @@ import {
   SKY,
   touchColors,
 } from "./sceneUtils";
+import { FrameLoop } from "./frameLoop";
 import { fireflyTexture } from "./textures";
 import { TrailRenderer } from "./trail";
 
@@ -26,6 +27,8 @@ interface CitySceneProps {
   // static map mode: with no session to drive attention height, raise terrain
   // columns by file size (lines of code) instead of leaving the plain flat
   locHeights?: boolean;
+  // the scrubber is playing: the one state that earns a continuous frame loop
+  playing?: boolean;
 }
 
 // Attention terrain: the map is a flat dark plain (fog of war); height is
@@ -98,6 +101,7 @@ export function CityScene({
   onSelect,
   onCanvasReady,
   locHeights,
+  playing = false,
 }: CitySceneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const tileMeshRef = useRef<THREE.InstancedMesh | null>(null);
@@ -113,12 +117,17 @@ export function CityScene({
   const trailRef = useRef<TrailRenderer | null>(null);
   const fireflyRef = useRef<THREE.Sprite | null>(null);
   const labelSetRef = useRef<DirLabelSet | null>(null);
-  const frameRef = useRef<number | null>(null);
+  const loopRef = useRef<FrameLoop | null>(null);
   const reducedRef = useRef(false);
   const boundsRef = useRef({ cx: 0, cz: 0, size: 120 });
+  // the render loop no longer rewrites every column matrix each frame, so a
+  // slot table swap that lands with every height already settled has to say so
+  const terrainDirtyRef = useRef(false);
   // handlers live in the mount effect; they read playback through this ref
   const playbackRef = useRef(playback);
   playbackRef.current = playback;
+  const playingRef = useRef(playing);
+  playingRef.current = playing;
   // camera fit deferred while the viewport reports no size (hidden pane,
   // background tab); resize retries it instead of leaving the camera at NaN
   const fitPendingRef = useRef<(() => boolean) | null>(null);
@@ -174,14 +183,13 @@ export function CityScene({
     controls.enableDamping = !reduced;
     controls.dampingFactor = 0.08;
     controls.maxPolarAngle = Math.PI * 0.44;
-    // the god view drifts slowly around the terrain until the user takes over
-    controls.autoRotate = !reduced;
-    controls.autoRotateSpeed = -0.5;
+    // mindwalk drifts the god view slowly around the terrain until the user
+    // takes over (`autoRotate`). That is unbounded idle motion — it would
+    // repaint a parked, visible view forever — so it does not survive the
+    // render-on-change rule and is dropped rather than special-cased.
+    controls.autoRotate = false;
     const tip = new SceneTip(host);
-    controls.addEventListener("start", () => {
-      controls.autoRotate = false;
-      tip.hide();
-    });
+    controls.addEventListener("start", () => tip.hide());
     controlsRef.current = controls;
 
     const sky = new THREE.HemisphereLight("#66779b", "#161922", 1.7);
@@ -264,6 +272,7 @@ export function CityScene({
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       if (fitPendingRef.current?.()) fitPendingRef.current = null;
+      loopRef.current?.invalidate();
     };
     const observer = new ResizeObserver(resize);
     observer.observe(host);
@@ -271,19 +280,22 @@ export function CityScene({
     const clock = new THREE.Clock();
     const matrix = new THREE.Matrix4();
     const quaternion = new THREE.Quaternion();
-    const render = () => {
-      controls.update();
+    // one frame; returns whether an animation is still in flight, which is the
+    // only thing that books the next one (see FrameLoop)
+    const drawFrame = (): boolean => {
+      const cameraMoved = controls.update();
       labelSetRef.current?.updateTargets(
         camera,
         renderer.domElement.clientWidth,
         renderer.domElement.clientHeight,
       );
-      labelSetRef.current?.ease(reducedRef.current);
+      const labelsEasing = labelSetRef.current?.ease(reducedRef.current) ?? false;
 
       // grow / shrink terrain columns toward their attention targets
       const terrain = terrainMeshRef.current;
       const slots = slotsRef.current;
       const heights = heightsRef.current;
+      let terrainMoving = false;
       if (terrain && slots.length > 0) {
         let moving = false;
         for (let i = 0; i < slots.length; i++) {
@@ -314,23 +326,37 @@ export function CityScene({
           );
           terrain.setMatrixAt(i, matrix);
         }
-        if (moving) terrain.instanceMatrix.needsUpdate = true;
+        if (moving || terrainDirtyRef.current) terrain.instanceMatrix.needsUpdate = true;
+        terrainDirtyRef.current = false;
+        terrainMoving = moving;
       }
 
+      // the firefly's breathing pulse is unbounded, so it lives under the
+      // playback exception and settles to its base scale when the walk stops
+      const playbackRunning = playingRef.current;
       const firefly = fireflyRef.current;
       if (firefly?.visible) {
-        const t = clock.getElapsedTime();
         const base = firefly.userData.baseScale as number;
-        const pulse = reducedRef.current ? 1 : 1 + 0.1 * Math.sin(t * 2.4);
+        const pulse =
+          playbackRunning && !reducedRef.current
+            ? 1 + 0.1 * Math.sin(clock.getElapsedTime() * 2.4)
+            : 1;
         firefly.scale.setScalar(base * pulse);
       }
       renderer.render(scene, camera);
-      frameRef.current = requestAnimationFrame(render);
+      return cameraMoved || labelsEasing || terrainMoving || playbackRunning;
     };
-    render();
+
+    const loop = new FrameLoop(host, drawFrame);
+    loopRef.current = loop;
+    // OrbitControls dispatches `change` from its own pointer/wheel/key
+    // handlers and from every external `controls.update()` (fitView,
+    // ensureVisible), so this covers camera motion the loop did not cause
+    controls.addEventListener("change", () => loop.invalidate());
 
     return () => {
-      if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      loop.dispose();
+      loopRef.current = null;
       if (hoverRaf) cancelAnimationFrame(hoverRaf);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
@@ -354,6 +380,8 @@ export function CityScene({
     slotsRef.current = [];
     heightsRef.current = new Map();
     boundsRef.current = bounds;
+    terrainDirtyRef.current = true;
+    loopRef.current?.invalidate();
     if (!city || city.files.length === 0) return;
 
     const group = new THREE.Group();
@@ -510,6 +538,7 @@ export function CityScene({
 
     return () => {
       fitPendingRef.current = null;
+      loopRef.current?.invalidate();
       disposeGroup(group);
       scene.remove(group);
       cityGroupRef.current = null;
@@ -574,6 +603,9 @@ export function CityScene({
     if (terrain.instanceColor) terrain.instanceColor.needsUpdate = true;
     if (tiles.instanceColor) tiles.instanceColor.needsUpdate = true;
     slotsRef.current = slots;
+    // slot index → fileId may have shifted even where no column is lerping
+    terrainDirtyRef.current = true;
+    loopRef.current?.invalidate();
   }, [city, playback, selectedPath, locHeights]);
 
   // the inspector opens over the right edge; pan the selected tile clear of it
@@ -584,7 +616,6 @@ export function CityScene({
     const controls = controlsRef.current;
     const canvas = rendererRef.current?.domElement;
     if (!file || !camera || !controls || !canvas) return;
-    controls.autoRotate = false;
     const top = heightsRef.current.get(file.id) ?? TILE_H;
     const world = centerFor(file, bounds);
     world.y = top;
@@ -634,7 +665,14 @@ export function CityScene({
         return p;
       }),
     );
+    loopRef.current?.invalidate();
   }, [city, playback, bounds]);
+
+  // starting or stopping the walk switches the loop between continuous and
+  // demand-driven; either edge needs a frame to act on it
+  useEffect(() => {
+    loopRef.current?.invalidate();
+  }, [playing]);
 
   return <div className="city-scene" ref={hostRef} aria-label="Attention terrain" />;
 }

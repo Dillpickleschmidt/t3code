@@ -14,6 +14,7 @@ import {
   touchColors,
 } from "./sceneUtils";
 import { computeTreeLayout, type TreeLayout } from "./treeLayout";
+import { FrameLoop } from "./frameLoop";
 import { fireflyTexture, haloTexture } from "./textures";
 import { TrailRenderer } from "./trail";
 
@@ -23,6 +24,8 @@ interface TreeSceneProps {
   selectedPath?: string;
   onSelect: (path?: string) => void;
   onCanvasReady?: (canvas: HTMLCanvasElement | null) => void;
+  // the scrubber is playing: the one state that earns a continuous frame loop
+  playing?: boolean;
 }
 
 // Firefly tree: the repo is a radial tree — directories fork, files are
@@ -67,6 +70,7 @@ export function TreeScene({
   selectedPath,
   onSelect,
   onCanvasReady,
+  playing = false,
 }: TreeSceneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const leafMeshRef = useRef<THREE.InstancedMesh | null>(null);
@@ -90,11 +94,16 @@ export function TreeScene({
   const trailRef = useRef<TrailRenderer | null>(null);
   const fireflyRef = useRef<THREE.Sprite | null>(null);
   const labelSetRef = useRef<DirLabelSet | null>(null);
-  const frameRef = useRef<number | null>(null);
+  const loopRef = useRef<FrameLoop | null>(null);
   const reducedRef = useRef(false);
+  // the render loop no longer rewrites every halo matrix each frame, so a slot
+  // table swap that lands with every radius already settled has to say so
+  const halosDirtyRef = useRef(false);
   // handlers live in the mount effect; they read playback through this ref
   const playbackRef = useRef(playback);
   playbackRef.current = playback;
+  const playingRef = useRef(playing);
+  playingRef.current = playing;
   // camera fit deferred while the viewport reports no size (hidden pane,
   // background tab); resize retries it instead of leaving the camera at NaN
   const fitPendingRef = useRef<(() => boolean) | null>(null);
@@ -134,13 +143,13 @@ export function TreeScene({
     controls.enableDamping = !reduced;
     controls.dampingFactor = 0.08;
     controls.maxPolarAngle = Math.PI * 0.44;
-    controls.autoRotate = !reduced;
-    controls.autoRotateSpeed = -0.5;
+    // mindwalk drifts the view slowly around the tree until the user takes
+    // over (`autoRotate`). That is unbounded idle motion — it would repaint a
+    // parked, visible view forever — so it does not survive the
+    // render-on-change rule and is dropped rather than special-cased.
+    controls.autoRotate = false;
     const tip = new SceneTip(host);
-    controls.addEventListener("start", () => {
-      controls.autoRotate = false;
-      tip.hide();
-    });
+    controls.addEventListener("start", () => tip.hide());
     controlsRef.current = controls;
 
     const sky = new THREE.HemisphereLight("#66779b", "#161922", 1.7);
@@ -231,6 +240,7 @@ export function TreeScene({
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       if (fitPendingRef.current?.()) fitPendingRef.current = null;
+      loopRef.current?.invalidate();
     };
     const observer = new ResizeObserver(resize);
     observer.observe(host);
@@ -238,20 +248,23 @@ export function TreeScene({
     const clock = new THREE.Clock();
     const matrix = new THREE.Matrix4();
     const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
-    const render = () => {
-      controls.update();
+    // one frame; returns whether an animation is still in flight, which is the
+    // only thing that books the next one (see FrameLoop)
+    const drawFrame = (): boolean => {
+      const cameraMoved = controls.update();
       labelSetRef.current?.updateTargets(
         camera,
         renderer.domElement.clientWidth,
         renderer.domElement.clientHeight,
       );
-      labelSetRef.current?.ease(reducedRef.current);
+      const labelsEasing = labelSetRef.current?.ease(reducedRef.current) ?? false;
 
       // pools of light grow toward their attention radius
       const halos = haloMeshRef.current;
       const slots = slotsRef.current;
       const radii = radiiRef.current;
       const treeLayout = layoutRef.current;
+      let halosMoving = false;
       if (halos && treeLayout && slots.length > 0) {
         let moving = false;
         for (let i = 0; i < slots.length; i++) {
@@ -276,23 +289,37 @@ export function TreeScene({
           );
           halos.setMatrixAt(i, matrix);
         }
-        if (moving) halos.instanceMatrix.needsUpdate = true;
+        if (moving || halosDirtyRef.current) halos.instanceMatrix.needsUpdate = true;
+        halosDirtyRef.current = false;
+        halosMoving = moving;
       }
 
+      // the firefly's breathing pulse is unbounded, so it lives under the
+      // playback exception and settles to its base scale when the walk stops
+      const playbackRunning = playingRef.current;
       const firefly = fireflyRef.current;
       if (firefly?.visible) {
-        const t = clock.getElapsedTime();
         const base = firefly.userData.baseScale as number;
-        const pulse = reducedRef.current ? 1 : 1 + 0.1 * Math.sin(t * 2.4);
+        const pulse =
+          playbackRunning && !reducedRef.current
+            ? 1 + 0.1 * Math.sin(clock.getElapsedTime() * 2.4)
+            : 1;
         firefly.scale.setScalar(base * pulse);
       }
       renderer.render(scene, camera);
-      frameRef.current = requestAnimationFrame(render);
+      return cameraMoved || labelsEasing || halosMoving || playbackRunning;
     };
-    render();
+
+    const loop = new FrameLoop(host, drawFrame);
+    loopRef.current = loop;
+    // OrbitControls dispatches `change` from its own pointer/wheel/key
+    // handlers and from every external `controls.update()` (fitView,
+    // ensureVisible), so this covers camera motion the loop did not cause
+    controls.addEventListener("change", () => loop.invalidate());
 
     return () => {
-      if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      loop.dispose();
+      loopRef.current = null;
       if (hoverRaf) cancelAnimationFrame(hoverRaf);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
@@ -316,6 +343,8 @@ export function TreeScene({
     layoutRef.current = layout;
     slotsRef.current = [];
     radiiRef.current = new Map();
+    halosDirtyRef.current = true;
+    loopRef.current?.invalidate();
     if (!city || !layout) return;
 
     const group = new THREE.Group();
@@ -554,6 +583,7 @@ export function TreeScene({
 
     return () => {
       fitPendingRef.current = null;
+      loopRef.current?.invalidate();
       disposeGroup(group);
       scene.remove(group);
       groupRef.current = null;
@@ -619,6 +649,8 @@ export function TreeScene({
     if (leaves.instanceColor) leaves.instanceColor.needsUpdate = true;
     if (ghosts?.instanceColor) ghosts.instanceColor.needsUpdate = true;
     slotsRef.current = slots;
+    // slot index → fileId may have shifted even where no halo is lerping
+    halosDirtyRef.current = true;
 
     // brighten branches that lead to light
     const colorAttr = edges.geometry.getAttribute("color") as THREE.BufferAttribute;
@@ -636,6 +668,7 @@ export function TreeScene({
       }
     }
     colorAttr.needsUpdate = true;
+    loopRef.current?.invalidate();
   }, [city, layout, playback]);
 
   // selection marker follows the selected leaf
@@ -654,7 +687,6 @@ export function TreeScene({
       const controls = controlsRef.current;
       const canvas = rendererRef.current?.domElement;
       if (camera && controls && canvas) {
-        controls.autoRotate = false;
         ensureVisible(
           camera,
           controls,
@@ -668,6 +700,7 @@ export function TreeScene({
       selection.ring.visible = false;
       selection.beam.visible = false;
     }
+    loopRef.current?.invalidate();
   }, [city, layout, selectedPath]);
 
   // trail arcs + firefly
@@ -699,7 +732,14 @@ export function TreeScene({
         return new THREE.Vector3(pos.x, LEAF_Y + 0.3, pos.z);
       }),
     );
+    loopRef.current?.invalidate();
   }, [city, layout, playback]);
+
+  // starting or stopping the walk switches the loop between continuous and
+  // demand-driven; either edge needs a frame to act on it
+  useEffect(() => {
+    loopRef.current?.invalidate();
+  }, [playing]);
 
   return <div className="city-scene" ref={hostRef} aria-label="Firefly tree" />;
 }
