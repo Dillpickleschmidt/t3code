@@ -14,7 +14,7 @@ import {
   SKY,
   touchColors,
 } from "./sceneUtils";
-import { FrameLoop } from "./frameLoop";
+import { ATTRACT_DRIFT_MS, FrameLoop } from "./frameLoop";
 import { fireflyTexture } from "./textures";
 import { TrailRenderer } from "./trail";
 
@@ -183,13 +183,28 @@ export function CityScene({
     controls.enableDamping = !reduced;
     controls.dampingFactor = 0.08;
     controls.maxPolarAngle = Math.PI * 0.44;
-    // mindwalk drifts the god view slowly around the terrain until the user
-    // takes over (`autoRotate`). That is unbounded idle motion — it would
-    // repaint a parked, visible view forever — so it does not survive the
-    // render-on-change rule and is dropped rather than special-cased.
-    controls.autoRotate = false;
+    // mindwalk drifts the god view slowly around the terrain until the user takes
+    // over. Perpetual drift on a parked, visible view is the case AGENTS.md
+    // names, so it is bounded rather than dropped: the arrival motion still
+    // plays, and stops at whichever comes first — the first interaction, which
+    // is mindwalk's own rule, or ATTRACT_DRIFT_MS. Reduced-motion users get no
+    // drift at all, as upstream.
+    controls.autoRotate = !reduced;
+    controls.autoRotateSpeed = -0.5;
+    let driftTimer: ReturnType<typeof setTimeout> | null = null;
+    const stopDrift = () => {
+      controls.autoRotate = false;
+      if (driftTimer !== null) {
+        clearTimeout(driftTimer);
+        driftTimer = null;
+      }
+    };
+    if (!reduced) driftTimer = setTimeout(stopDrift, ATTRACT_DRIFT_MS);
     const tip = new SceneTip(host);
-    controls.addEventListener("start", () => tip.hide());
+    controls.addEventListener("start", () => {
+      stopDrift();
+      tip.hide();
+    });
     controlsRef.current = controls;
 
     const sky = new THREE.HemisphereLight("#66779b", "#161922", 1.7);
@@ -355,6 +370,7 @@ export function CityScene({
     controls.addEventListener("change", () => loop.invalidate());
 
     return () => {
+      stopDrift();
       loop.dispose();
       loopRef.current = null;
       if (hoverRaf) cancelAnimationFrame(hoverRaf);

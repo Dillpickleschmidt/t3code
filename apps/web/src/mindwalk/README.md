@@ -21,9 +21,12 @@ One behavioral deviation is intentional and permanent, because AGENTS.md's
   instead of mindwalk's unconditional `requestAnimationFrame` loop, so a
   visible but idle scene issues zero draw calls. See the file's header for the
   three inputs that book a frame.
-- **`controls.autoRotate` is off.** Mindwalk drifts the camera until the user
-  takes over; that is unbounded idle motion with no bounded form, so it is
-  dropped rather than special-cased.
+- **`controls.autoRotate` is time-bounded.** Mindwalk drifts the camera until
+  the first interaction, which on a view you open and never touch is unbounded
+  motion on a parked, visible host. The drift is kept — it is how the scene
+  reads as 3D on arrival — but now ends at whichever comes first: that first
+  interaction, still mindwalk's own rule, or `ATTRACT_DRIFT_MS`. Reduced-motion
+  users get no drift, as upstream.
 - **The firefly's sine pulse only runs while playback is running**, gated by
   the `playing` prop both scenes now take.
 - **`DirLabelSet.ease`, and the height/halo lerps, report whether they moved.**
