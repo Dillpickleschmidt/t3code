@@ -215,6 +215,30 @@ it.layer(CitymapTestLayer)("CitymapBuilder", (it) => {
     }),
   );
 
+  it.effect("does not follow a symlinked directory out of the walked root", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const outside = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-citymap-outside-" });
+      yield* writeFile(outside, "secret.txt", "not part of the repo\n");
+
+      // Not a git repo, so the fallback walk runs. Go's WalkDir uses lstat
+      // semantics and never descends a symlink; neither should we, or the
+      // citymap would expose paths the endpoint was never scoped to.
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-citymap-symlink-" });
+      yield* writeFile(root, "inside.txt", "mine\n");
+      yield* fileSystem.symlink(outside, path.join(root, "escape"));
+
+      const builder = yield* CitymapBuilder.CitymapBuilder;
+      const city = yield* builder.buildForRoot(root);
+
+      assert.deepEqual(
+        city.files.map((entry) => entry.path),
+        ["inside.txt"],
+      );
+    }),
+  );
+
   it.effect("falls back to walking a directory that is not a repository", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

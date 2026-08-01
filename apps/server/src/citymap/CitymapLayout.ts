@@ -15,6 +15,31 @@
  */
 import type { Citymap, CitymapDir, CitymapFile, CitymapRect } from "@t3tools/contracts";
 
+const UTF8 = new TextEncoder();
+/** Matches a surrogate code unit, i.e. a supplementary-plane character. */
+const HAS_SURROGATE = /[\uD800-\uDFFF]/;
+
+/**
+ * Order strings by their UTF-8 bytes, the way Go's `sort.Strings` does.
+ *
+ * JavaScript's `<` compares UTF-16 code units, which sorts supplementary-plane
+ * characters (emoji and the like) *before* U+E000-U+FFFF rather than after —
+ * enough to shift file ids and treemap positions away from the reference
+ * layout. UTF-16 order only diverges from code-point order when a surrogate is
+ * involved, so the all-BMP case keeps the cheap comparison.
+ */
+export function compareUtf8(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!HAS_SURROGATE.test(a) && !HAS_SURROGATE.test(b)) return a < b ? -1 : 1;
+  const left = UTF8.encode(a);
+  const right = UTF8.encode(b);
+  const shared = Math.min(left.length, right.length);
+  for (let index = 0; index < shared; index += 1) {
+    if (left[index] !== right[index]) return left[index]! < right[index]! ? -1 : 1;
+  }
+  return left.length === right.length ? 0 : left.length < right.length ? -1 : 1;
+}
+
 /** The world is a fixed 120x120 square; every rect is baked into it. */
 const WORLD_SIZE = 120;
 /** Gap carved out of every child rect, so buildings never touch. */
@@ -170,7 +195,7 @@ export function buildCitymap(input: {
     });
   }
 
-  cityFiles.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  cityFiles.sort((a, b) => compareUtf8(a.path, b.path));
   cityFiles.forEach((file, index) => {
     file.id = index;
   });
@@ -308,9 +333,7 @@ function layoutNode(
       area: 0,
     });
   }
-  items.sort((a, b) =>
-    a.weight === b.weight ? (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) : b.weight - a.weight,
-  );
+  items.sort((a, b) => (a.weight === b.weight ? compareUtf8(a.name, b.name) : b.weight - a.weight));
 
   const total = items.reduce((sum, item) => sum + item.weight, 0);
   if (total <= 0) return;
@@ -331,9 +354,7 @@ function layoutNode(
 }
 
 function sortedChildren(node: LayoutNode): ReadonlyArray<LayoutNode> {
-  return [...node.children.keys()]
-    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
-    .map((name) => node.children.get(name)!);
+  return [...node.children.keys()].sort(compareUtf8).map((name) => node.children.get(name)!);
 }
 
 function capAspect(rect: CitymapRect, maxRatio: number): CitymapRect {

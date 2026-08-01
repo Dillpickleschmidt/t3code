@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 
-import { buildCitymap, extensionOf, langForPath } from "./CitymapLayout.ts";
+import { buildCitymap, compareUtf8, extensionOf, langForPath } from "./CitymapLayout.ts";
 import type { InspectedFile } from "./CitymapLayout.ts";
 
 const file = (path: string, lines: number, bytes = lines * 12): InspectedFile => ({
@@ -33,6 +33,23 @@ describe("langForPath", () => {
     assert.equal(langForPath("scripts/build.sh"), "sh");
     // A dotfile is all extension, with no basename to fall back on.
     assert.equal(extensionOf(".gitignore"), ".gitignore");
+  });
+});
+
+describe("compareUtf8", () => {
+  it("orders supplementary-plane characters after U+E000, as Go does", () => {
+    const astral = "\u{10000}";
+    const privateUse = "";
+
+    // JavaScript's `<` puts the surrogate pair first; UTF-8 bytes do not, and
+    // the reference layout sorts by bytes.
+    assert.isTrue(astral < privateUse);
+    assert.isAbove(compareUtf8(astral, privateUse), 0);
+    assert.isBelow(compareUtf8(privateUse, astral), 0);
+    assert.equal(compareUtf8(astral, astral), 0);
+    // The all-BMP fast path must still agree with plain comparison.
+    assert.isBelow(compareUtf8("a.go", "b.go"), 0);
+    assert.isBelow(compareUtf8("pkg/a.go", "pkg/a.go.bak"), 0);
   });
 });
 
