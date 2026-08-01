@@ -35,15 +35,15 @@ export function ViewPanel({ view, onViewChange, note }: ViewPanelProps) {
         }}
       >
         <ToggleGroupItem className="w-full justify-start gap-2" value="tree">
-          <TreePine size={14} />
+          <TreePine />
           <span>Tree</span>
         </ToggleGroupItem>
         <ToggleGroupItem className="w-full justify-start gap-2" value="terrain">
-          <Mountain size={14} />
+          <Mountain />
           <span>Terrain</span>
         </ToggleGroupItem>
       </ToggleGroup>
-      <p className="px-1 text-[0.7rem] text-muted-foreground/70 leading-snug">{note}</p>
+      <p className="px-1 text-xs text-muted-foreground/70 leading-snug">{note}</p>
     </div>
   );
 }

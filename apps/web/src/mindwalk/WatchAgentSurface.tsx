@@ -7,10 +7,11 @@ import { TooltipProvider } from "~/components/ui/tooltip";
 import { useTheme } from "~/hooks/useTheme";
 import { PrimaryEnvironmentHttpClient } from "../environments/primary/httpClient";
 import { runPrimaryHttp } from "../lib/runtime";
-import { cssVariables, paletteFor, resolveSky } from "./palette";
+import { cssVariables, paletteFor, resolveScenePalette } from "./palette";
 import { PlaybackEngine } from "./playback/reducer";
 import { CityScene } from "./scene/CityScene";
 import { TreeScene } from "./scene/TreeScene";
+import type { ScenePalette } from "./palette";
 import type { CityMap, Trace } from "./types";
 import { Dock, type PanelDescriptor } from "./ui/Dock";
 import { Hud } from "./ui/Hud";
@@ -41,27 +42,21 @@ export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) 
   const { resolvedTheme } = useTheme();
   const palette = useMemo(() => paletteFor(resolvedTheme), [resolvedTheme]);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
-  const [sky, setSky] = useState<string | undefined>();
+  const [resolved, setResolved] = useState<ScenePalette | undefined>();
 
-  // The stage is painted by WebGL, so it cannot inherit `bg-background` the way
-  // the chrome does — it has to be told. Reading the computed value keeps the
-  // two exactly equal instead of near-equal, and survives T3 retuning its
-  // palette. Deferred a frame because `useTheme` applies the `.dark` class from
-  // its own effect, and effect order between components is not guaranteed.
+  // The stage's neutrals are read off the live theme rather than declared —
+  // see `resolveScenePalette`. Deferred a frame because `useTheme` applies the
+  // `.dark` class from its own effect, and effect order between components is
+  // not guaranteed.
   useEffect(() => {
-    let frame = 0;
-    const read = () => {
+    const frame = requestAnimationFrame(() => {
       const host = surfaceRef.current;
-      if (host) setSky(resolveSky(host));
-    };
-    frame = requestAnimationFrame(read);
+      if (host) setResolved(resolveScenePalette(host, resolvedTheme));
+    });
     return () => cancelAnimationFrame(frame);
   }, [resolvedTheme]);
 
-  const scenePalette = useMemo(
-    () => (sky ? { ...palette.scene, sky } : palette.scene),
-    [palette, sky],
-  );
+  const scenePalette = resolved ?? palette.scene;
 
   const [snapshot, setSnapshot] = useState<Snapshot | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -225,7 +220,7 @@ export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) 
       <div
         ref={surfaceRef}
         className="@container relative flex h-full flex-col overflow-hidden bg-background"
-        style={cssVariables(palette)}
+        style={cssVariables(palette, scenePalette)}
       >
         <div className="relative min-h-0 flex-1">
           {snapshot && city ? (
@@ -259,7 +254,7 @@ export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) 
           )}
 
           {mapUnavailable ? (
-            <div className="mindwalk-glass absolute top-4 right-4 z-40 rounded-[--control-radius] border border-border px-2.5 py-1.5 text-muted-foreground text-xs">
+            <div className="mindwalk-glass absolute top-4 right-4 z-40 rounded-[var(--control-radius)] border border-border px-2.5 py-1.5 text-muted-foreground text-xs">
               No repository map for this thread — timeline only.
             </div>
           ) : null}

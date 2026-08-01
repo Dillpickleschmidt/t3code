@@ -88,7 +88,7 @@ export const Hud = memo(function Hud({
             <button
               type="button"
               onClick={onOpenAgents}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-[--control-radius] border border-border bg-card/70 px-2 py-0.5 text-muted-foreground text-xs hover:text-foreground"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-[var(--control-radius)] border border-border bg-card/70 px-2 py-0.5 text-muted-foreground text-xs hover:text-foreground"
               aria-label={`Open Agent lenses, current ${agentLabel}`}
             >
               <span className="text-muted-foreground/70 uppercase tracking-[0.08em]">Lens</span>
@@ -97,7 +97,7 @@ export const Hud = memo(function Hud({
           ) : null}
         </div>
         {city ? (
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[0.7rem] text-muted-foreground">
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-muted-foreground">
             <span>{city.repo.commit || "worktree"}</span>
             {city.repo.dirty ? <span className="text-warning">● dirty</span> : null}
             {trace?.session.model ? <span>{trace.session.model}</span> : null}
@@ -153,7 +153,7 @@ export const Hud = memo(function Hud({
             </div>
             {/* session scale: quiet background numbers, final totals only —
                 unlike the playhead-live spectrum above */}
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.7rem] text-muted-foreground/80 @max-[640px]:hidden">
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/80 @max-[640px]:hidden">
               <Hint text={`Tool calls — ${mixHint(stats.actions)}`}>
                 <span className="cursor-help">{countActions(stats.actions)} calls</span>
               </Hint>
@@ -190,7 +190,7 @@ export const Hud = memo(function Hud({
             </div>
             {/* review: only signals worth a second look — absent when clean */}
             {showReview ? (
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.7rem]">
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                 <span className="text-muted-foreground/70 uppercase tracking-[0.1em]">review</span>
                 {errorCount > 0 ? (
                   <Hint text={`${mixHint(stats.errors)}${errorCaveat(stats.observability.errors)}`}>
@@ -242,7 +242,7 @@ export const Hud = memo(function Hud({
             {churnOpen ? (
               <div
                 ref={churnPanelRef}
-                className="mindwalk-glass mt-2 grid max-w-sm gap-0.5 rounded-[--control-radius] border border-border p-1.5 shadow-lg"
+                className="mindwalk-glass mt-2 grid max-w-sm gap-0.5 rounded-[var(--control-radius)] border border-border p-1.5 shadow-lg"
               >
                 {churn.slice(0, CHURN_PANEL_ROWS).map((entry) => (
                   <button
@@ -263,7 +263,7 @@ export const Hud = memo(function Hud({
                   </button>
                 ))}
                 {churn.length > CHURN_PANEL_ROWS ? (
-                  <p className="px-2 py-1 text-[0.7rem] text-muted-foreground/70">
+                  <p className="px-2 py-1 text-xs text-muted-foreground/70">
                     …and {churn.length - CHURN_PANEL_ROWS} more
                   </p>
                 ) : null}

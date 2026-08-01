@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 
+import { Button } from "~/components/ui/button";
 import { Separator } from "~/components/ui/separator";
 import { Hint } from "./Hint";
 
@@ -78,13 +79,13 @@ export function Dock({ panels, openSheet, openPop, onToggle, onClosePop }: DockP
       {pop ? (
         <div
           ref={popRef}
-          className="mindwalk-glass absolute top-0 right-[calc(100%+10px)] z-20 min-w-[168px] rounded-[--control-radius] border border-border p-2 shadow-xl @max-[900px]:static @max-[900px]:right-auto"
+          className="mindwalk-glass absolute top-0 right-[calc(100%+10px)] z-20 min-w-[168px] rounded-[var(--control-radius)] border border-border p-2 shadow-xl @max-[900px]:static @max-[900px]:right-auto"
         >
           {pop.render()}
         </div>
       ) : null}
       {sheet ? (
-        <aside className="mindwalk-glass h-full w-[320px] overflow-hidden rounded-[--control-radius] border border-border shadow-xl @max-[900px]:h-auto @max-[900px]:max-h-[46%] @max-[900px]:w-auto @max-[900px]:min-w-0 @max-[900px]:flex-1">
+        <aside className="mindwalk-glass h-full w-[320px] overflow-hidden rounded-[var(--control-radius)] border border-border shadow-xl @max-[900px]:h-auto @max-[900px]:max-h-[46%] @max-[900px]:w-auto @max-[900px]:min-w-0 @max-[900px]:flex-1">
           {sheet.render()}
         </aside>
       ) : null}
@@ -92,7 +93,7 @@ export function Dock({ panels, openSheet, openPop, onToggle, onClosePop }: DockP
         {/* toggle buttons, not tabs: panels open as pops or sheets with no
             tabpanel relationship, so aria-pressed is the honest semantic */}
         <div
-          className="mindwalk-glass grid gap-1.5 rounded-[--control-radius] border border-border p-1.5"
+          className="mindwalk-glass grid gap-1.5 rounded-[var(--control-radius)] border border-border p-1.5"
           role="group"
           aria-label="Stage panels"
         >
@@ -104,19 +105,16 @@ export function Dock({ panels, openSheet, openPop, onToggle, onClosePop }: DockP
                 const Icon = panel.icon;
                 return (
                   <Hint key={panel.id} text={panel.hint}>
-                    <button
-                      type="button"
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
                       aria-pressed={active}
                       aria-label={panel.hint}
+                      data-pressed={active || undefined}
                       onClick={() => onToggle(panel)}
-                      className={`inline-flex size-7 items-center justify-center rounded-[--control-radius] ${
-                        active
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                      }`}
                     >
-                      <Icon size={15} />
-                    </button>
+                      <Icon />
+                    </Button>
                   </Hint>
                 );
               })}

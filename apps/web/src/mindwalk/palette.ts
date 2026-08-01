@@ -106,14 +106,12 @@ export interface ScenePalette {
  * way mindwalk read `var(--act-edit)`.
  */
 export interface DataPalette {
-  /** Legend swatches. `hit`/`read`/`edit` are the scene's own values. */
+  /** Legend swatches, straight from the scene's own values. The neutral pair
+   * (unvisited, ghost) is resolved rather than declared — see `cssVariables`. */
   readonly touch: {
     readonly hit: string;
     readonly read: string;
     readonly edit: string;
-    readonly unvisited: string;
-    /** Ghost swatches are hollow — a border, matching the wireframe orbs. */
-    readonly ghostBorder: string;
   };
   /** Timeline histogram and readout. Cool = observation, warm = mutation;
    * chroma tracks importance so edits outshine the background hum. */
@@ -151,30 +149,28 @@ const DARK: MindwalkPalette = {
       selected: "#f6ead2",
     },
     city: {
-      unvisited: "#5b6372",
-      ghost: "#404551",
-      locRamp: ["#5b6372", "#e0894f", "#9a6bd8", "#e0524f"],
-      // the directory floor plates sit a step above the sky, so they track it:
-      // blue-grey islands on a neutral backdrop read as a colour bug
+      unvisited: "#616161",
+      ghost: "#464646",
+      locRamp: ["#616161", "#e0894f", "#9a6bd8", "#e0524f"],
       dirShadeNear: "#171717",
       dirShadeFar: "#232323",
     },
     tree: {
-      unvisited: "#5a6375",
-      ghost: "#4d5464",
-      edgeBase: "#3c424f",
-      edgeLit: "#7d8496",
+      unvisited: "#616161",
+      ghost: "#525252",
+      edgeBase: "#404040",
+      edgeLit: "#8a8a8a",
       fireflyHot: "#ffeeda",
     },
     light: {
-      hemiSky: "#66779b",
-      hemiGround: "#161922",
+      hemiSky: "#7a7a7a",
+      hemiGround: "#0a0a0a",
       hemiIntensity: 1.7,
-      sunColor: "#b6c5de",
+      sunColor: "#c9c9c9",
       sunIntensity: 1.1,
     },
     glowBlending: THREE.AdditiveBlending,
-    labelInk: "rgba(197, 205, 222, 0.95)",
+    labelInk: "#a1a1a1",
     fireflyStops: ["rgba(255,255,255,1)", "rgba(255,210,160,0.55)", "rgba(255,158,94,0)"],
   },
   data: {
@@ -182,8 +178,6 @@ const DARK: MindwalkPalette = {
       hit: "#8fb45f",
       read: "#a5c8f1",
       edit: "#f0ad5a",
-      unvisited: "oklch(0.5 0.014 254)",
-      ghostBorder: "oklch(0.55 0.014 254)",
     },
     action: {
       search: "oklch(0.74 0.09 192)",
@@ -215,28 +209,28 @@ const LIGHT: MindwalkPalette = {
     city: {
       // unvisited sits just *below* the sky by day exactly as it sits just
       // above it by night: present, but the dullest thing on the stage
-      unvisited: "#aab2c0",
-      ghost: "#cbd1da",
-      locRamp: ["#aab2c0", "#c26a1c", "#6a3fa6", "#b02623"],
+      unvisited: "#a8a8a8",
+      ghost: "#c9c9c9",
+      locRamp: ["#a8a8a8", "#c26a1c", "#6a3fa6", "#b02623"],
       dirShadeNear: "#ededed",
       dirShadeFar: "#dedede",
     },
     tree: {
-      unvisited: "#a9b1c0",
-      ghost: "#c6ccd6",
-      edgeBase: "#c2c8d3",
-      edgeLit: "#5e6777",
+      unvisited: "#a8a8a8",
+      ghost: "#bdbdbd",
+      edgeBase: "#c4c4c4",
+      edgeLit: "#767676",
       fireflyHot: "#3f2a10",
     },
     light: {
-      hemiSky: "#dfe8f7",
-      hemiGround: "#b5afa4",
+      hemiSky: "#e6e6e6",
+      hemiGround: "#fcfcfc",
       hemiIntensity: 2.2,
-      sunColor: "#fff7ea",
+      sunColor: "#fdfdfd",
       sunIntensity: 1.5,
     },
     glowBlending: THREE.NormalBlending,
-    labelInk: "rgba(74, 84, 104, 0.95)",
+    labelInk: "#71717a",
     fireflyStops: ["rgba(63,42,16,0.95)", "rgba(140,74,20,0.5)", "rgba(194,83,15,0)"],
   },
   data: {
@@ -244,8 +238,6 @@ const LIGHT: MindwalkPalette = {
       hit: "#4f7d22",
       read: "#2c6aa8",
       edit: "#b4700f",
-      unvisited: "oklch(0.68 0.014 254)",
-      ghostBorder: "oklch(0.72 0.014 254)",
     },
     action: {
       search: "oklch(0.52 0.11 192)",
@@ -268,31 +260,123 @@ export function paletteFor(theme: MindwalkTheme): MindwalkPalette {
 }
 
 /**
- * The surface's own background colour, as a hex three.js can parse, so the
- * stage is exactly what the rest of the app is sitting on rather than a
- * near-match that drifts whenever T3 retunes its palette.
+ * Positions on T3's own neutral axis, as a percentage from `--background`
+ * toward `--foreground`.
+ *
+ * Mindwalk's structural greys — the plain, the branches, unvisited and ghost
+ * files — were a cool blue-grey family tuned against its navy sky. Against
+ * T3's neutral surfaces they read as a foreign object, so they are expressed
+ * as *distances* rather than colours: how far each thing sits from the
+ * background toward the foreground. That keeps mindwalk's ordering intact
+ * (ghost dimmer than unvisited, a lit branch brighter than one at rest) while
+ * putting every value on whatever axis T3 currently uses.
+ *
+ * One ratio serves both themes, because "toward the foreground" already means
+ * "more present" in either — it darkens on paper and lightens at night.
+ */
+const STRUCTURE_MIX = {
+  dirShadeNear: 6,
+  dirShadeFar: 12,
+  cityGhost: 26,
+  treeEdgeBase: 24,
+  treeGhost: 32,
+  unvisited: 39,
+  treeEdgeLit: 55,
+} as const;
+
+/**
+ * The scene palette with every neutral resolved against the live theme.
+ *
+ * A WebGL canvas cannot inherit `bg-background` and `text-muted-foreground`
+ * the way the chrome does — it has to be told — so the surface reads them off
+ * a probe element inside itself and hands the result to both scenes. Resolved
+ * rather than hardcoded so the stage stays exactly what the app is sitting on
+ * if T3 retunes its palette, instead of a near-match that rots.
  *
  * The detour through a canvas is deliberate. T3's tokens are authored in
  * `oklch`, and `getComputedStyle` serializes a colour in the space it was
  * written in — so it hands back `oklch(...)`, which `THREE.Color.setStyle`
  * cannot read. A canvas context parses the full CSS colour syntax and
  * re-serializes opaque colours as `#rrggbb`, which three.js can.
+ *
+ * Any failure falls back to the static palette wholesale rather than in part,
+ * so the scene is never a mix of two axes.
  */
-export function resolveSky(element: HTMLElement): string | undefined {
-  const css = getComputedStyle(element).backgroundColor;
-  if (!css) return undefined;
+export function resolveScenePalette(host: HTMLElement, theme: MindwalkTheme): ScenePalette {
+  const fallback = paletteFor(theme).scene;
   const context = document.createElement("canvas").getContext("2d");
-  if (!context) return undefined;
-  // an unparseable assignment leaves fillStyle untouched, so a sentinel is the
-  // only way to tell "the browser rejected it" from "the answer is black"
-  const sentinel = "#010203";
-  context.fillStyle = sentinel;
-  context.fillStyle = css;
-  const resolved = context.fillStyle;
-  if (typeof resolved !== "string" || resolved === sentinel) return undefined;
-  // translucent colours serialize as rgba(); the stage background is opaque,
-  // and a partly transparent sky would not be a usable fog target anyway
-  return resolved.startsWith("#") ? resolved : undefined;
+  if (!context) return fallback;
+
+  const probe = document.createElement("div");
+  probe.style.display = "none";
+  host.appendChild(probe);
+  try {
+    const read = (value: string): string | undefined => {
+      probe.style.color = "";
+      probe.style.color = value;
+      // a value this browser cannot parse is dropped, leaving the property
+      // empty — without this the probe would silently report inherited colour
+      if (!probe.style.color) return undefined;
+      const computed = getComputedStyle(probe).color;
+      if (!computed) return undefined;
+      // an unparseable assignment leaves fillStyle untouched, so a sentinel is
+      // the only way to tell "the browser rejected it" from "the answer is black"
+      const sentinel = "#010203";
+      context.fillStyle = sentinel;
+      context.fillStyle = computed;
+      const resolved = context.fillStyle;
+      if (typeof resolved !== "string" || resolved === sentinel) return undefined;
+      // translucent colours serialize as rgba(); the stage is opaque, and a
+      // see-through sky would not be a usable fog target anyway
+      return resolved.startsWith("#") ? resolved : undefined;
+    };
+    const mix = (percent: number) =>
+      read(`color-mix(in oklab, var(--foreground) ${percent}%, var(--background))`);
+
+    const sky = read("var(--background)");
+    const labelInk = read("var(--muted-foreground)");
+    const unvisited = mix(STRUCTURE_MIX.unvisited);
+    const cityGhost = mix(STRUCTURE_MIX.cityGhost);
+    const treeGhost = mix(STRUCTURE_MIX.treeGhost);
+    const edgeBase = mix(STRUCTURE_MIX.treeEdgeBase);
+    const edgeLit = mix(STRUCTURE_MIX.treeEdgeLit);
+    const dirShadeNear = mix(STRUCTURE_MIX.dirShadeNear);
+    const dirShadeFar = mix(STRUCTURE_MIX.dirShadeFar);
+    if (
+      !sky ||
+      !labelInk ||
+      !unvisited ||
+      !cityGhost ||
+      !treeGhost ||
+      !edgeBase ||
+      !edgeLit ||
+      !dirShadeNear ||
+      !dirShadeFar
+    ) {
+      return fallback;
+    }
+
+    return {
+      ...fallback,
+      sky,
+      labelInk,
+      city: {
+        ...fallback.city,
+        unvisited,
+        ghost: cityGhost,
+        // the ramp's first stop is the grey that means "smallest file", and it
+        // has always been the same grey as unvisited
+        locRamp: [unvisited, ...fallback.city.locRamp.slice(1)] as [string, string, string, string],
+        dirShadeNear,
+        dirShadeFar,
+      },
+      tree: { ...fallback.tree, unvisited, ghost: treeGhost, edgeBase, edgeLit },
+      // the hemisphere's lower half is bounce off the floor, which is the sky
+      light: { ...fallback.light, hemiGround: sky },
+    };
+  } finally {
+    probe.remove();
+  }
 }
 
 /**
@@ -300,13 +384,18 @@ export function resolveSky(element: HTMLElement): string | undefined {
  * CSS reads `var(--mw-act-edit)` where mindwalk read `var(--act-edit)`; the
  * `mw-` prefix keeps them from colliding with T3's own tokens.
  */
-export function cssVariables({ data }: MindwalkPalette): Record<string, string> {
+export function cssVariables(
+  { data }: MindwalkPalette,
+  scene: ScenePalette,
+): Record<string, string> {
   return {
     "--mw-touch-hit": data.touch.hit,
     "--mw-touch-read": data.touch.read,
     "--mw-touch-edit": data.touch.edit,
-    "--mw-touch-unvisited": data.touch.unvisited,
-    "--mw-touch-ghost-border": data.touch.ghostBorder,
+    // the two neutral swatches come from the *resolved* scene, not the static
+    // palette: they key structural greys, which move with T3's axis
+    "--mw-touch-unvisited": scene.city.unvisited,
+    "--mw-touch-ghost-border": scene.city.ghost,
     "--mw-act-search": data.action.search,
     "--mw-act-read": data.action.read,
     "--mw-act-edit": data.action.edit,
