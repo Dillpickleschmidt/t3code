@@ -1,13 +1,13 @@
 import type { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { Crosshair, Mountain, TreePine } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { TooltipProvider } from "~/components/ui/tooltip";
 import { useTheme } from "~/hooks/useTheme";
 import { PrimaryEnvironmentHttpClient } from "../environments/primary/httpClient";
 import { runPrimaryHttp } from "../lib/runtime";
-import { cssVariables, paletteFor } from "./palette";
+import { cssVariables, paletteFor, resolveSky } from "./palette";
 import { PlaybackEngine } from "./playback/reducer";
 import { CityScene } from "./scene/CityScene";
 import { TreeScene } from "./scene/TreeScene";
@@ -40,6 +40,28 @@ interface Snapshot {
 export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) {
   const { resolvedTheme } = useTheme();
   const palette = useMemo(() => paletteFor(resolvedTheme), [resolvedTheme]);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const [sky, setSky] = useState<string | undefined>();
+
+  // The stage is painted by WebGL, so it cannot inherit `bg-background` the way
+  // the chrome does — it has to be told. Reading the computed value keeps the
+  // two exactly equal instead of near-equal, and survives T3 retuning its
+  // palette. Deferred a frame because `useTheme` applies the `.dark` class from
+  // its own effect, and effect order between components is not guaranteed.
+  useEffect(() => {
+    let frame = 0;
+    const read = () => {
+      const host = surfaceRef.current;
+      if (host) setSky(resolveSky(host));
+    };
+    frame = requestAnimationFrame(read);
+    return () => cancelAnimationFrame(frame);
+  }, [resolvedTheme]);
+
+  const scenePalette = useMemo(
+    () => (sky ? { ...palette.scene, sky } : palette.scene),
+    [palette, sky],
+  );
 
   const [snapshot, setSnapshot] = useState<Snapshot | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -189,7 +211,7 @@ export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) 
     playback,
     onSelect: selectFile,
     playing,
-    theme: resolvedTheme,
+    palette: scenePalette,
     ...selection,
   };
   const mapUnavailable = city !== undefined && city.files.length === 0;
@@ -201,6 +223,7 @@ export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) 
     // maximized panel and a narrow one the same layout.
     <TooltipProvider delay={0} closeDelay={0}>
       <div
+        ref={surfaceRef}
         className="@container relative flex h-full flex-col overflow-hidden bg-background"
         style={cssVariables(palette)}
       >

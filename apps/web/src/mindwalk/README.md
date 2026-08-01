@@ -42,6 +42,16 @@ the material it describes. **Dark mode remains the fidelity reference**: it is
 what a live `mindwalk serve` renders, and what screenshot parity is checked
 against.
 
+The sky is the one colour `palette.ts` does not get the last word on. A WebGL
+canvas cannot inherit `bg-background` the way the chrome does, so the surface
+reads its own computed background and hands it to both scenes — the stage is
+then exactly what the rest of the app is sitting on, and stays that way if T3
+retunes its palette. Mindwalk's own sky was a blue-tinted `#12151c`, which
+against T3's neutral `--color-neutral-950` read as a different surface bolted
+into the panel. The values in `palette.ts` are the fallback for when the probe
+cannot run, and the directory floor plates track the sky so they don't become
+blue-grey islands on a neutral backdrop.
+
 A theme switch rebuilds the scene rather than mutating materials in place. It
 happens rarely, and the alternative is a second construction path that has to
 stay in step with the first forever.
