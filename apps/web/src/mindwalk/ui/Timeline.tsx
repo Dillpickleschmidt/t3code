@@ -1,6 +1,7 @@
 import { Ellipsis, Pause, Play, RotateCcw, StepBack, StepForward } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { Button } from "~/components/ui/button";
 import type { Action, Mark, Trace } from "../types";
 
 interface TimelineProps {
@@ -255,26 +256,26 @@ export function Timeline({
           >
             {total > 0 ? `${seq + 1} / ${total}` : "0 / 0"}
           </span>
-          <span className="block text-[0.7rem] text-muted-foreground/70 tabular-nums">
+          <span className="block text-xs text-muted-foreground/70 tabular-nums">
             {event?.ts ? clock(event.ts) : "—"}
           </span>
         </div>
 
         <div className="flex items-center gap-1.5">
           <IconButton onClick={() => step(-1)} disabled={locked} label="Step back one event">
-            <StepBack size={15} />
+            <StepBack />
           </IconButton>
-          <button
-            type="button"
-            className="inline-flex size-8 items-center justify-center rounded-full bg-foreground text-background disabled:pointer-events-none disabled:opacity-45"
+          <Button
+            size="icon-sm"
+            className="rounded-full"
             onClick={togglePlay}
             disabled={locked}
             aria-label={playing ? "Pause playback" : "Play playback"}
           >
-            {playing ? <Pause size={16} /> : <Play size={16} className="ml-0.5" />}
-          </button>
+            {playing ? <Pause /> : <Play className="ml-0.5" />}
+          </Button>
           <IconButton onClick={() => step(1)} disabled={locked} label="Step forward one event">
-            <StepForward size={15} />
+            <StepForward />
           </IconButton>
           <div className="relative" ref={menuRef}>
             {/* the trigger doubles as status: the engaged speed when it isn't 1× */}
@@ -285,15 +286,15 @@ export function Timeline({
               expanded={menuOpen}
             >
               {speed !== 1 ? (
-                <span className="font-medium text-[0.7rem] tabular-nums">{speed}×</span>
+                <span className="font-medium text-xs tabular-nums">{speed}×</span>
               ) : (
-                <Ellipsis size={15} />
+                <Ellipsis />
               )}
             </IconButton>
             {menuOpen ? (
-              <div className="mindwalk-glass absolute right-0 bottom-full z-20 mb-2 min-w-[168px] rounded-[--control-radius] border border-border p-2 shadow-xl">
+              <div className="mindwalk-glass absolute right-0 bottom-full z-20 mb-2 min-w-[168px] rounded-[var(--control-radius)] border border-border p-2 shadow-xl">
                 <div className="flex items-center justify-between gap-2 px-1 pb-2">
-                  <span className="text-[0.7rem] text-muted-foreground/70 uppercase tracking-[0.08em]">
+                  <span className="text-xs text-muted-foreground/70 uppercase tracking-[0.08em]">
                     Speed
                   </span>
                   <div className="flex gap-1">
@@ -322,7 +323,7 @@ export function Timeline({
                     setMenuOpen(false);
                   }}
                 >
-                  <RotateCcw size={14} />
+                  <RotateCcw className="size-3.5" />
                   <span>Restart</span>
                 </button>
               </div>
@@ -339,7 +340,7 @@ export function Timeline({
               <span className={`size-2 shrink-0 rounded-full ${ACTION_COLOR[event.action]}`} />
               <span className="flex-none font-semibold text-foreground">{event.tool}</span>
               {event.isError ? (
-                <span className="flex-none text-[0.7rem] text-destructive uppercase tracking-[0.08em]">
+                <span className="flex-none text-xs text-destructive uppercase tracking-[0.08em]">
                   error
                 </span>
               ) : null}
@@ -358,7 +359,7 @@ export function Timeline({
         {/* the key is reference material; below this the caption line belongs
             to the summary alone (mindwalk's own 1180px rule) */}
         <div
-          className="flex flex-none items-center gap-5 text-[0.68rem] text-muted-foreground/70 uppercase tracking-[0.07em] @max-[1180px]:hidden"
+          className="flex flex-none items-center gap-5 text-xs text-muted-foreground/70 uppercase tracking-[0.07em] @max-[1180px]:hidden"
           aria-hidden
         >
           <span className="inline-flex items-center gap-3">
@@ -403,16 +404,16 @@ function IconButton({
   expanded?: boolean;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="icon-sm"
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
       {...(expanded !== undefined && { "aria-haspopup": true, "aria-expanded": expanded })}
-      className="inline-flex h-7 w-[30px] items-center justify-center rounded-[--control-radius] text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
     >
       {children}
-    </button>
+    </Button>
   );
 }
 

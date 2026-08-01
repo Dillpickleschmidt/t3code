@@ -42,15 +42,27 @@ the material it describes. **Dark mode remains the fidelity reference**: it is
 what a live `mindwalk serve` renders, and what screenshot parity is checked
 against.
 
-The sky is the one colour `palette.ts` does not get the last word on. A WebGL
-canvas cannot inherit `bg-background` the way the chrome does, so the surface
-reads its own computed background and hands it to both scenes — the stage is
-then exactly what the rest of the app is sitting on, and stays that way if T3
-retunes its palette. Mindwalk's own sky was a blue-tinted `#12151c`, which
-against T3's neutral `--color-neutral-950` read as a different surface bolted
-into the panel. The values in `palette.ts` are the fallback for when the probe
-cannot run, and the directory floor plates track the sky so they don't become
-blue-grey islands on a neutral backdrop.
+## Neutrals are resolved, not declared
+
+Every grey in the scene comes from T3 at runtime. A WebGL canvas cannot
+inherit `bg-background` and `text-muted-foreground` the way the chrome does, so
+the surface reads them off a probe element inside itself and hands the result
+to both scenes (`resolveScenePalette`). The values in `palette.ts` are only the
+fallback for when that probe cannot run.
+
+Mindwalk's structural greys — the plain, the branches, unvisited and ghost
+files, the floor plates — were a cool blue-grey family tuned against its navy
+`#12151c` sky. Against T3's neutral surfaces they read as a foreign object, so
+they are now expressed as _distances_ rather than colours: a percentage from
+`--background` toward `--foreground` (`STRUCTURE_MIX`). That keeps mindwalk's
+ordering intact — ghost dimmer than unvisited, a lit branch brighter than one
+at rest — while putting every value on whatever axis T3 currently uses. One
+ratio serves both themes, since "toward the foreground" already means "more
+present" in either: it darkens on paper and lightens at night.
+
+What stays declared is what encodes _meaning_ and has no T3 counterpart: the
+touch states, the timeline's action spectrum, and the mark colours. T3 has no
+token for "read but not edited".
 
 A theme switch rebuilds the scene rather than mutating materials in place. It
 happens rarely, and the alternative is a second construction path that has to
@@ -92,11 +104,16 @@ Visual, and the point of the restyle:
   This includes `textures.ts:labelTexture()`, whose in-scene directory labels
   asked for a face this app does not ship and were silently falling back.
 - **T3 primitives replace hand-rolled ones** where the swap is presentational:
-  `ui/tooltip` for the `[data-hint]` `::after` bubble, `ui/separator` for the
-  dock divider, `ui/toggle-group` for the view switch (which gains the roving
-  tabindex and arrow-key navigation upstream explicitly declined). The Dock's
-  own open/close logic stays — a pop is allowed to coexist with an open sheet,
-  which is not what a popover means.
+  `ui/button` for every transport, dock, and close control, `ui/tooltip` for the
+  `[data-hint]` `::after` bubble, `ui/separator` for the dock divider, and
+  `ui/toggle-group` for the view switch (which gains the roving tabindex and
+  arrow-key navigation upstream explicitly declined). Focus rings, disabled
+  treatment, icon sizing, and hit targets then track the app rather than being
+  restated here. The Dock's own open/close logic stays — a pop is allowed to
+  coexist with an open sheet, which is not what a popover means.
+- **Type comes from T3's scale.** Mindwalk's three hand-set sizes
+  (`0.65`/`0.68`/`0.9rem`) are gone; hierarchy in the dense rows is carried by
+  colour, which was already doing most of the work.
 - **Responsive rules are keyed to the container, not the viewport.** Mindwalk's
   own breakpoints are preserved (`1180px` drops the timeline legend, `900px`
   turns the dock into a bottom sheet and hides the position dial), but as

@@ -1,5 +1,6 @@
 import { AlertTriangle, X } from "lucide-react";
 
+import { Button } from "~/components/ui/button";
 import { touchWord, type CityFile, type Touch, type TraceEvent } from "../types";
 
 interface InspectorProps {
@@ -57,7 +58,7 @@ export function Inspector({ file, touch, history, onClose, onJumpTo }: Inspector
             {name}
           </div>
           {file.ghost ? (
-            <span className="mt-1 inline-block rounded-sm border border-[var(--mw-touch-ghost-border)] px-1.5 py-px text-[0.65rem] text-muted-foreground">
+            <span className="mt-1 inline-block rounded-sm border border-[var(--mw-touch-ghost-border)] px-1.5 py-px text-xs text-muted-foreground">
               ghost — not in this tree
             </span>
           ) : null}
@@ -74,7 +75,7 @@ export function Inspector({ file, touch, history, onClose, onJumpTo }: Inspector
       </dl>
 
       <section className="mt-4 flex min-h-0 flex-1 flex-col">
-        <p className="text-[0.65rem] text-muted-foreground/70 uppercase tracking-[0.1em]">
+        <p className="text-xs text-muted-foreground/70 uppercase tracking-[0.1em]">
           Visits · {history.length}
         </p>
         <div className="mt-1.5 min-h-0 flex-1 overflow-y-auto">
@@ -96,7 +97,7 @@ export function Inspector({ file, touch, history, onClose, onJumpTo }: Inspector
                   #{event.seq + 1}
                 </strong>
                 <span className="min-w-0 flex-1 truncate text-muted-foreground">{event.tool}</span>
-                <span className="shrink-0 text-[0.65rem] text-muted-foreground/70 tabular-nums">
+                <span className="shrink-0 text-xs text-muted-foreground/70 tabular-nums">
                   {event.ts ? clock(event.ts) : ""}
                 </span>
                 {event.isError ? (
@@ -121,15 +122,15 @@ function Head({ children, onClose }: { children: React.ReactNode; onClose: () =>
   return (
     <div className="flex items-start justify-between gap-2">
       {children}
-      <button
-        type="button"
-        className="inline-flex size-7 shrink-0 items-center justify-center rounded-[--control-radius] text-muted-foreground hover:bg-accent hover:text-foreground"
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="shrink-0"
         onClick={onClose}
-        title="Close"
         aria-label="Close inspector"
       >
-        <X size={15} />
-      </button>
+        <X />
+      </Button>
     </div>
   );
 }
@@ -137,9 +138,7 @@ function Head({ children, onClose }: { children: React.ReactNode; onClose: () =>
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-[0.65rem] text-muted-foreground/70 uppercase tracking-[0.08em]">
-        {label}
-      </dt>
+      <dt className="text-xs text-muted-foreground/70 uppercase tracking-[0.08em]">{label}</dt>
       <dd className="mt-0.5 text-foreground tabular-nums">{children}</dd>
     </div>
   );
