@@ -43,7 +43,15 @@ export type MindwalkTheme = "light" | "dark";
  * mutable Color would let one scene's tuning leak into the other's.
  */
 export interface ScenePalette {
-  /** Scene background and fog target — distant geometry fades into it. */
+  /**
+   * Scene background and fog target — distant geometry fades into it.
+   *
+   * The value here is only a fallback. At runtime the surface reads its own
+   * computed `--background` and overrides this, so the stage is exactly the
+   * colour the rest of the app is sitting on. Mindwalk's own sky was a
+   * blue-tinted `#12151c`, which against T3's neutral dark read as a
+   * different surface bolted into the panel.
+   */
   readonly sky: string;
   /** The walker's trail. */
   readonly ember: string;
@@ -131,7 +139,8 @@ export interface MindwalkPalette {
 
 const DARK: MindwalkPalette = {
   scene: {
-    sky: "#12151c",
+    // fallback only; `--color-neutral-950`, the dark `--background`
+    sky: "#0a0a0a",
     ember: "#ff9e5e",
     touch: {
       hit: "#8fb45f",
@@ -145,8 +154,10 @@ const DARK: MindwalkPalette = {
       unvisited: "#5b6372",
       ghost: "#404551",
       locRamp: ["#5b6372", "#e0894f", "#9a6bd8", "#e0524f"],
-      dirShadeNear: "#1a1f29",
-      dirShadeFar: "#252b37",
+      // the directory floor plates sit a step above the sky, so they track it:
+      // blue-grey islands on a neutral backdrop read as a colour bug
+      dirShadeNear: "#171717",
+      dirShadeFar: "#232323",
     },
     tree: {
       unvisited: "#5a6375",
@@ -192,9 +203,8 @@ const DARK: MindwalkPalette = {
 
 const LIGHT: MindwalkPalette = {
   scene: {
-    // paper, not white: a flat #fff stage loses the aerial-perspective fog
-    // cue that the night sky gets for free
-    sky: "#eef1f6",
+    // fallback only; `--color-zinc-25`, the light `--background`
+    sky: "#fcfcfc",
     ember: "#c2530f",
     touch: {
       hit: "#4f7d22",
@@ -208,8 +218,8 @@ const LIGHT: MindwalkPalette = {
       unvisited: "#aab2c0",
       ghost: "#cbd1da",
       locRamp: ["#aab2c0", "#c26a1c", "#6a3fa6", "#b02623"],
-      dirShadeNear: "#e2e6ee",
-      dirShadeFar: "#d3d9e3",
+      dirShadeNear: "#ededed",
+      dirShadeFar: "#dedede",
     },
     tree: {
       unvisited: "#a9b1c0",
@@ -255,6 +265,34 @@ const LIGHT: MindwalkPalette = {
 
 export function paletteFor(theme: MindwalkTheme): MindwalkPalette {
   return theme === "light" ? LIGHT : DARK;
+}
+
+/**
+ * The surface's own background colour, as a hex three.js can parse, so the
+ * stage is exactly what the rest of the app is sitting on rather than a
+ * near-match that drifts whenever T3 retunes its palette.
+ *
+ * The detour through a canvas is deliberate. T3's tokens are authored in
+ * `oklch`, and `getComputedStyle` serializes a colour in the space it was
+ * written in — so it hands back `oklch(...)`, which `THREE.Color.setStyle`
+ * cannot read. A canvas context parses the full CSS colour syntax and
+ * re-serializes opaque colours as `#rrggbb`, which three.js can.
+ */
+export function resolveSky(element: HTMLElement): string | undefined {
+  const css = getComputedStyle(element).backgroundColor;
+  if (!css) return undefined;
+  const context = document.createElement("canvas").getContext("2d");
+  if (!context) return undefined;
+  // an unparseable assignment leaves fillStyle untouched, so a sentinel is the
+  // only way to tell "the browser rejected it" from "the answer is black"
+  const sentinel = "#010203";
+  context.fillStyle = sentinel;
+  context.fillStyle = css;
+  const resolved = context.fillStyle;
+  if (typeof resolved !== "string" || resolved === sentinel) return undefined;
+  // translucent colours serialize as rgba(); the stage background is opaque,
+  // and a partly transparent sky would not be a usable fog target anyway
+  return resolved.startsWith("#") ? resolved : undefined;
 }
 
 /**

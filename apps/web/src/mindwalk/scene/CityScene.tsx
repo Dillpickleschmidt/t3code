@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { touchWord, type CityFile, type CityMap, type Touch } from "../types";
 import type { FilePlayback } from "../playback/reducer";
-import { paletteFor, type MindwalkTheme, type ScenePalette } from "../palette";
+import type { ScenePalette } from "../palette";
 import { DirLabelSet } from "./dirLabels";
 import {
   disposeGroup,
@@ -28,8 +28,10 @@ interface CitySceneProps {
   locHeights?: boolean;
   // the scrubber is playing: the one state that earns a continuous frame loop
   playing?: boolean;
-  /** Which palette the stage renders in — see `../palette.ts`. */
-  theme: MindwalkTheme;
+  /** Colours the stage renders in. Resolved by the surface, not derived
+   * here, so both scenes and the chrome around them agree — including the
+   * sky, which is read from T3's own `--background`. */
+  palette: ScenePalette;
 }
 
 // Attention terrain: the map is a flat plain (fog of war); height is earned by
@@ -110,12 +112,11 @@ export function CityScene({
   onCanvasReady,
   locHeights,
   playing = false,
-  theme,
+  palette,
 }: CitySceneProps) {
-  // A theme switch rebuilds the stage rather than mutating every material in
+  // A palette switch rebuilds the stage rather than mutating every material in
   // place: it happens once in a blue moon, and the alternative is a second
   // code path that has to stay in step with scene construction forever.
-  const palette = useMemo(() => paletteFor(theme).scene, [theme]);
   const colors = useMemo(() => sceneColors(palette), [palette]);
   const locRamp = useMemo(() => locRampFor(palette), [palette]);
   const hostRef = useRef<HTMLDivElement | null>(null);
