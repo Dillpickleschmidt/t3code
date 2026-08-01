@@ -142,6 +142,21 @@ describe("rightPanelStore", () => {
     });
   });
 
+  it("keeps the 3D watch surface as a singleton alongside other surfaces", () => {
+    useRightPanelStore.getState().open(refA, "watch3d");
+    useRightPanelStore.getState().open(refA, "diff");
+    useRightPanelStore.getState().open(refA, "watch3d");
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "watch3d",
+      surfaces: [
+        { id: "watch3d", kind: "watch3d" },
+        { id: "diff", kind: "diff" },
+      ],
+    });
+  });
+
   it("replaces the standalone explorer with peer file surfaces", () => {
     useRightPanelStore.getState().open(refA, "files");
     useRightPanelStore.getState().openFile(refA, "src/index.ts");

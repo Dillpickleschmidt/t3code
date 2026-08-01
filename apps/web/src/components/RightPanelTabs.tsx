@@ -1,6 +1,15 @@
 import type { ContextMenuItem, PreviewSessionSnapshot } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
-import { ClipboardList, FileDiff, Files, Globe2, Plus, TerminalSquare, X } from "lucide-react";
+import {
+  Boxes,
+  ClipboardList,
+  FileDiff,
+  Files,
+  Globe2,
+  Plus,
+  TerminalSquare,
+  X,
+} from "lucide-react";
 import {
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
@@ -44,9 +53,11 @@ interface RightPanelTabsProps {
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
+  onAddWatch3d: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
+  watch3dAvailable: boolean;
   children: ReactNode;
 }
 
@@ -54,6 +65,7 @@ const SURFACE_DISABLED_REASONS = {
   browser: "Browser previews are only available in the T3 Code desktop app.",
   files: "Files are only available when a project is open.",
   diff: "Diff is only available for server threads in Git repositories.",
+  watch3d: "3D Watch Agent is only available for server threads.",
 } as const;
 
 type TabContextMenuAction = "copy-path" | "close" | "close-others" | "close-to-right" | "close-all";
@@ -92,8 +104,10 @@ function RightPanelEmptyState(props: {
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
+  onAddWatch3d: () => void;
   diffAvailable: boolean;
   filesAvailable: boolean;
+  watch3dAvailable: boolean;
 }) {
   const actions = [
     {
@@ -119,6 +133,14 @@ function RightPanelEmptyState(props: {
       available: props.diffAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.diff,
       onClick: props.onAddDiff,
+    },
+    {
+      label: "3D Watch Agent",
+      description: "Replay this thread over your repository.",
+      icon: Boxes,
+      available: props.watch3dAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.watch3d,
+      onClick: props.onAddWatch3d,
     },
   ] as const;
 
@@ -197,6 +219,8 @@ function surfaceTitle(
       );
     case "plan":
       return "Plan";
+    case "watch3d":
+      return "3D Watch Agent";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -258,6 +282,8 @@ function SurfaceIcon({
       return <TerminalSquare className="size-3.5 shrink-0" />;
     case "plan":
       return <ClipboardList className="size-3.5 shrink-0" />;
+    case "watch3d":
+      return <Boxes className="size-3.5 shrink-0" />;
   }
 }
 
@@ -463,6 +489,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     <FileDiff />
                     Diff
                   </SurfaceMenuItem>
+                  <SurfaceMenuItem
+                    available={props.watch3dAvailable}
+                    disabledReason={SURFACE_DISABLED_REASONS.watch3d}
+                    onClick={props.onAddWatch3d}
+                  >
+                    <Boxes />
+                    3D Watch Agent
+                  </SurfaceMenuItem>
                 </MenuPopup>
               </Menu>
             ) : null}
@@ -476,8 +510,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
+            onAddWatch3d={props.onAddWatch3d}
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
+            watch3dAvailable={props.watch3dAvailable}
           />
         ) : (
           props.children

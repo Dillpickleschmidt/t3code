@@ -1,7 +1,7 @@
 /* Minimal load-bearing styling for the ported scenes, lifted from mindwalk's
  * styles.css: the scenes absolutely fill their host and the hover tip is a
  * floating chip. Values are mindwalk's; restyling to T3 tokens is later work. */
-.mindwalk-harness {
+.mindwalk-surface {
   --hairline-strong: oklch(0.46 0.016 252);
   --ink: oklch(0.91 0.014 88);
   --muted: oklch(0.72 0.02 252);
@@ -11,15 +11,15 @@
   overflow: hidden;
 }
 
-.mindwalk-harness .city-scene {
+.mindwalk-surface .city-scene {
   position: absolute;
   inset: 0;
 }
-.mindwalk-harness .city-scene canvas {
+.mindwalk-surface .city-scene canvas {
   display: block;
 }
 
-.mindwalk-harness .scene-tip {
+.mindwalk-surface .scene-tip {
   position: absolute;
   z-index: 30;
   display: none;
@@ -38,6 +38,6 @@
   pointer-events: none;
   font-variant-numeric: tabular-nums;
 }
-.mindwalk-harness .scene-tip .dim {
+.mindwalk-surface .scene-tip .dim {
   color: var(--muted);
 }

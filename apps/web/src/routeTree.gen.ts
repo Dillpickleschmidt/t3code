@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PairRouteImport } from './routes/pair'
-import { Route as Mindwalk3dRouteImport } from './routes/mindwalk-3d'
 import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
@@ -36,11 +35,6 @@ const SettingsRoute = SettingsRouteImport.update({
 const PairRoute = PairRouteImport.update({
   id: '/pair',
   path: '/pair',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const Mindwalk3dRoute = Mindwalk3dRouteImport.update({
-  id: '/mindwalk-3d',
-  path: '/mindwalk-3d',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConnectRoute = ConnectRouteImport.update({
@@ -122,7 +116,6 @@ const ChatEnvironmentIdThreadIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/connect': typeof ConnectRoute
-  '/mindwalk-3d': typeof Mindwalk3dRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/connect/callback': typeof ConnectCallbackRoute
@@ -140,7 +133,6 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
-  '/mindwalk-3d': typeof Mindwalk3dRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/connect/callback': typeof ConnectCallbackRoute
@@ -161,7 +153,6 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_chat': typeof ChatRouteWithChildren
   '/connect': typeof ConnectRoute
-  '/mindwalk-3d': typeof Mindwalk3dRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
   '/connect_/callback': typeof ConnectCallbackRoute
@@ -183,7 +174,6 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/connect'
-    | '/mindwalk-3d'
     | '/pair'
     | '/settings'
     | '/connect/callback'
@@ -201,7 +191,6 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/connect'
-    | '/mindwalk-3d'
     | '/pair'
     | '/settings'
     | '/connect/callback'
@@ -221,7 +210,6 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_chat'
     | '/connect'
-    | '/mindwalk-3d'
     | '/pair'
     | '/settings'
     | '/connect_/callback'
@@ -242,7 +230,6 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   ChatRoute: typeof ChatRouteWithChildren
   ConnectRoute: typeof ConnectRoute
-  Mindwalk3dRoute: typeof Mindwalk3dRoute
   PairRoute: typeof PairRoute
   SettingsRoute: typeof SettingsRouteWithChildren
   ConnectCallbackRoute: typeof ConnectCallbackRoute
@@ -262,13 +249,6 @@ declare module '@tanstack/react-router' {
       path: '/pair'
       fullPath: '/pair'
       preLoaderRoute: typeof PairRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mindwalk-3d': {
-      id: '/mindwalk-3d'
-      path: '/mindwalk-3d'
-      fullPath: '/mindwalk-3d'
-      preLoaderRoute: typeof Mindwalk3dRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/connect': {
@@ -424,7 +404,6 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRouteWithChildren,
   ConnectRoute: ConnectRoute,
-  Mindwalk3dRoute: Mindwalk3dRoute,
   PairRoute: PairRoute,
   SettingsRoute: SettingsRouteWithChildren,
   ConnectCallbackRoute: ConnectCallbackRoute,
