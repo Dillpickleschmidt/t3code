@@ -22,88 +22,41 @@ const build = (files: ReadonlyArray<InspectedFile>, ghostPaths?: ReadonlyArray<s
   });
 
 describe("langForPath", () => {
+  // The golden fixture in CitymapBuilder.test.ts pins the common cases end to
+  // end; these are the ones it does not reach — aliasing, case folding, and
+  // the fallthrough to a raw extension.
   it("maps known extensions and falls through to the raw extension", () => {
     assert.equal(langForPath("src/main.go"), "go");
     assert.equal(langForPath("src/App.tsx"), "typescript");
     assert.equal(langForPath("docs/readme.MD"), "markdown");
     assert.equal(langForPath("conf/app.yml"), "yaml");
     assert.equal(langForPath("scripts/build.sh"), "sh");
-  });
-
-  it("treats an extensionless file as text, and a dotfile as all extension", () => {
-    assert.equal(langForPath("Makefile"), "text");
+    // A dotfile is all extension, with no basename to fall back on.
     assert.equal(extensionOf(".gitignore"), ".gitignore");
-    assert.equal(langForPath(".gitignore"), "gitignore");
   });
 });
 
 describe("buildCitymap", () => {
-  it("is deterministic and gives every file a non-empty rect", () => {
-    const files = [file("src/main.go", 2), file("README.md", 1)];
-    const first = build(files);
-    const second = build(files);
-
-    assert.deepEqual(first, second);
-    assert.equal(first.files.length, 2);
-    assert.isAbove(first.files[0]!.rect.w, 0);
-    assert.isAbove(first.files[0]!.rect.d, 0);
-  });
-
-  it("sorts files by path and assigns ids in that order", () => {
-    const city = build([file("z.go", 5), file("a.go", 5), file("m/b.go", 5)]);
-
-    assert.deepEqual(
-      city.files.map((entry) => entry.path),
-      ["a.go", "m/b.go", "z.go"],
-    );
-    assert.deepEqual(
-      city.files.map((entry) => entry.id),
-      [0, 1, 2],
-    );
-  });
-
-  it("emits a plate per directory carrying its recursive file count and lines", () => {
-    const city = build([
-      file("pkg/a/one.go", 10),
-      file("pkg/a/two.go", 20),
-      file("pkg/b/three.go", 30),
-    ]);
-
-    const pkg = city.dirs.find((dir) => dir.path === "pkg");
-    const pkgA = city.dirs.find((dir) => dir.path === "pkg/a");
-    assert.deepEqual(
-      { fileCount: pkg?.fileCount, lines: pkg?.lines, depth: pkg?.depth },
-      { fileCount: 3, lines: 60, depth: 1 },
-    );
-    assert.deepEqual(
-      { fileCount: pkgA?.fileCount, lines: pkgA?.lines, depth: pkgA?.depth },
-      { fileCount: 2, lines: 30, depth: 2 },
-    );
-  });
-
-  it("keeps aspect ratios sane across a wide flat directory", () => {
+  // 80 siblings push the squarify and aspect-cap paths far past anything the
+  // 13-file golden reaches, so this checks the rect invariants at scale.
+  it("keeps every rect inside the world and reasonably square at scale", () => {
     const files = Array.from({ length: 80 }, (_, index) =>
       file(`pkg/file-${String(index).padStart(2, "0")}.go`, 2),
     );
+    const city = build(files);
 
-    const worstRatio = build(files).files.reduce((worst, entry) => {
+    let worstRatio = 0;
+    for (const entry of [...city.files, ...city.dirs]) {
       assert.isAbove(entry.rect.w, 0);
       assert.isAbove(entry.rect.d, 0);
-      return Math.max(worst, entry.rect.w / entry.rect.d, entry.rect.d / entry.rect.w);
-    }, 0);
-
-    assert.isBelow(worstRatio, 25);
-  });
-
-  it("stays inside the 120x120 world", () => {
-    const city = build([file("a.go", 1000), file("deep/nested/b.go", 3), file("c.md", 40)]);
-
-    for (const entry of [...city.files, ...city.dirs]) {
       assert.isAtLeast(entry.rect.x, 0);
       assert.isAtLeast(entry.rect.z, 0);
       assert.isAtMost(entry.rect.x + entry.rect.w, 120);
       assert.isAtMost(entry.rect.z + entry.rect.d, 120);
+      worstRatio = Math.max(worstRatio, entry.rect.w / entry.rect.d, entry.rect.d / entry.rect.w);
     }
+
+    assert.isBelow(worstRatio, 25);
   });
 
   it("sizes a byte-heavy file above a line-light one, and floors tiny files", () => {
