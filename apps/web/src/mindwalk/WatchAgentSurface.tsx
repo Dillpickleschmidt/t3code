@@ -1,29 +1,28 @@
 import type { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import { Pause, Play, SkipBack } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Crosshair, Mountain, TreePine } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { TooltipProvider } from "~/components/ui/tooltip";
+import { useTheme } from "~/hooks/useTheme";
 import { PrimaryEnvironmentHttpClient } from "../environments/primary/httpClient";
 import { runPrimaryHttp } from "../lib/runtime";
+import { cssVariables, paletteFor } from "./palette";
 import { PlaybackEngine } from "./playback/reducer";
 import { CityScene } from "./scene/CityScene";
 import { TreeScene } from "./scene/TreeScene";
 import type { CityMap, Trace } from "./types";
+import { Dock, type PanelDescriptor } from "./ui/Dock";
+import { Hud } from "./ui/Hud";
+import { Inspector } from "./ui/Inspector";
+import { Timeline } from "./ui/Timeline";
+import { ViewPanel, type SceneView } from "./ui/ViewPanel";
 import "./surface.css";
-
-type View = "tree" | "terrain";
 
 interface Snapshot {
   trace: Trace;
   city: CityMap;
 }
-
-/** mindwalk's own transport cadence (`ui/Timeline.tsx`): one event every 340ms
- * at 1x, and higher speeds advance several events per tick rather than ticking
- * faster, so the render rate stays bounded. */
-const BASE_TICK_MS = 340;
-const SPEEDS = [1, 4, 16] as const;
-type Speed = (typeof SPEEDS)[number];
 
 /**
  * 3D Watch Agent: one thread's trace played back over its repository, as
@@ -31,17 +30,25 @@ type Speed = (typeof SPEEDS)[number];
  *
  * The snapshot arrives over HTTP rather than the thread websocket — it is
  * hundreds of kilobytes gzipped and the citymap half wants sending once, not
- * once per activity. The scene chrome (HUD, inspector, full timeline) is a
- * separate port; this is the transport and the scenes.
+ * once per activity.
+ *
+ * This file is the T3-side equivalent of mindwalk's `App.tsx`, `state/`, and
+ * `api/`, which are the parts of the port deliberately written rather than
+ * copied. Everything under `ui/` is mindwalk's structure restyled onto T3's
+ * tokens; everything under `scene/` and `playback/` is near-verbatim.
  */
 export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) {
+  const { resolvedTheme } = useTheme();
+  const palette = useMemo(() => paletteFor(resolvedTheme), [resolvedTheme]);
+
   const [snapshot, setSnapshot] = useState<Snapshot | undefined>();
   const [error, setError] = useState<string | undefined>();
-  const [view, setView] = useState<View>("terrain");
+  const [view, setView] = useState<SceneView>("terrain");
   const [selectedPath, setSelectedPath] = useState<string | undefined>();
   const [currentSeq, setCurrentSeq] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState<Speed>(1);
+  const [openSheet, setOpenSheet] = useState<string | null>(null);
+  const [openPop, setOpenPop] = useState<string | null>(null);
 
   useEffect(() => {
     setSnapshot(undefined);
@@ -81,141 +88,170 @@ export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) 
     };
   }, [threadId]);
 
-  const total = snapshot?.trace.events.length ?? 0;
-  const max = Math.max(0, total - 1);
-  const seq = Math.min(currentSeq, max);
+  const trace = snapshot?.trace;
+  const city = snapshot?.city;
+  const total = trace?.events.length ?? 0;
+  const seq = Math.min(currentSeq, Math.max(0, total - 1));
 
-  // The timer reads position through refs so that ticking the playhead does not
-  // tear the interval down and rebuild it on every event.
-  const seqRef = useRef(seq);
-  const maxRef = useRef(max);
-  const playingRef = useRef(playing);
-  seqRef.current = seq;
-  maxRef.current = max;
-  playingRef.current = playing;
-
-  useEffect(() => {
-    if (!playing || total === 0) return;
-    const interval = Math.max(85, BASE_TICK_MS / speed);
-    const step = Math.max(1, Math.round((speed * interval) / BASE_TICK_MS));
-    const timer = window.setInterval(() => {
-      if (seqRef.current >= maxRef.current) {
-        setPlaying(false);
-        return;
-      }
-      setCurrentSeq(Math.min(seqRef.current + step, maxRef.current));
-    }, interval);
-    return () => window.clearInterval(timer);
-  }, [playing, speed, total]);
-
-  // Pressing play at the end restarts, as mindwalk does, rather than sitting on
-  // a finished timeline doing nothing.
-  const togglePlay = useCallback(() => {
-    if (!playingRef.current && seqRef.current >= maxRef.current) setCurrentSeq(0);
-    setPlaying((wasPlaying) => !wasPlaying);
-  }, []);
-
-  const engine = useMemo(
-    () => new PlaybackEngine(snapshot?.trace, snapshot?.city),
-    [snapshot?.trace, snapshot?.city],
-  );
+  const engine = useMemo(() => new PlaybackEngine(trace, city), [trace, city]);
   // A fresh wrapper per call: the engine hands out its live collections, so the
   // scenes re-read only when this identity changes.
   const playback = useMemo(() => engine.snapshotAt(seq), [engine, seq]);
 
-  const event = snapshot?.trace.events[seq];
+  // live tallies for the HUD spectrum; touchByPath mirrors the backend stats scope
+  const touchCounts = useMemo(() => {
+    let edited = 0;
+    let read = 0;
+    let seen = 0;
+    for (const touch of playback.touchByPath.values()) {
+      if (touch === "edit") edited++;
+      else if (touch === "read") read++;
+      else seen++;
+    }
+    return { edited, read, seen };
+  }, [playback]);
+
+  const selectedFile = useMemo(
+    () => (selectedPath ? city?.files.find((file) => file.path === selectedPath) : undefined),
+    [city, selectedPath],
+  );
+
+  const churn = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const event of trace?.events ?? []) {
+      for (const target of event.targets) {
+        if (target.touch === "edit" && target.path) {
+          counts.set(target.path, (counts.get(target.path) ?? 0) + 1);
+        }
+      }
+    }
+    return [...counts.entries()]
+      .filter(([, edits]) => edits >= 3)
+      .map(([path, edits]) => ({ path, edits }))
+      .sort((a, b) => b.edits - a.edits || (a.path < b.path ? -1 : 1));
+  }, [trace]);
+
+  const viewNote =
+    view === "tree"
+      ? trace
+        ? "glow ∝ revisits"
+        : "static map"
+      : trace
+        ? "height ∝ depth × revisits"
+        : "height ∝ lines";
+
+  // selecting a file from anywhere opens the inspector on it, as upstream does
+  const selectFile = useCallback((path?: string) => {
+    setSelectedPath(path);
+    if (path) setOpenSheet("inspect");
+  }, []);
+
+  const togglePanel = useCallback((panel: PanelDescriptor) => {
+    if (panel.presentation === "pop") setOpenPop((open) => (open === panel.id ? null : panel.id));
+    else setOpenSheet((open) => (open === panel.id ? null : panel.id));
+  }, []);
+
+  const closePop = useCallback(() => setOpenPop(null), []);
+  const closeSheet = useCallback(() => setOpenSheet(null), []);
+
+  const panels: PanelDescriptor[] = [
+    {
+      id: "view",
+      icon: view === "tree" ? TreePine : Mountain,
+      hint: `Scene view: ${view} — click to change`,
+      section: "scene",
+      presentation: "pop",
+      render: () => <ViewPanel view={view} onViewChange={setView} note={viewNote} />,
+    },
+    {
+      id: "inspect",
+      icon: Crosshair,
+      hint: "Inspect the selected file",
+      section: "session",
+      presentation: "sheet",
+      render: () => (
+        <Inspector
+          {...(selectedFile && { file: selectedFile })}
+          {...(selectedFile &&
+            playback.touchByPath.get(selectedFile.path) && {
+              touch: playback.touchByPath.get(selectedFile.path)!,
+            })}
+          history={selectedFile ? (playback.historyByPath.get(selectedFile.path) ?? []) : []}
+          onClose={closeSheet}
+          onJumpTo={setCurrentSeq}
+        />
+      ),
+    },
+  ];
+
   const selection = selectedPath === undefined ? {} : { selectedPath };
-  const mapUnavailable = snapshot !== undefined && snapshot.city.files.length === 0;
+  const sceneProps = {
+    playback,
+    onSelect: selectFile,
+    playing,
+    theme: resolvedTheme,
+    ...selection,
+  };
+  const mapUnavailable = city !== undefined && city.files.length === 0;
 
   return (
-    <div className="mindwalk-surface bg-[#12151c]">
-      {snapshot ? (
-        view === "tree" ? (
-          <TreeScene
-            city={snapshot.city}
-            playback={playback}
-            onSelect={setSelectedPath}
-            playing={playing}
-            {...selection}
-          />
-        ) : (
-          <CityScene
-            city={snapshot.city}
-            playback={playback}
-            onSelect={setSelectedPath}
-            playing={playing}
-            {...selection}
-          />
-        )
-      ) : (
-        <div className="flex h-full items-center justify-center text-sm text-white/60">
-          {error ? `Could not load this thread's trace: ${error}` : "Building the map…"}
-        </div>
-      )}
+    // `@container` makes the responsive rules below key off this surface's own
+    // width. Mindwalk keyed them off the viewport because it owned the window;
+    // here the surface is a resizable panel, so a viewport query would give a
+    // maximized panel and a narrow one the same layout.
+    <TooltipProvider delay={0} closeDelay={0}>
+      <div
+        className="@container relative flex h-full flex-col overflow-hidden bg-background"
+        style={cssVariables(palette)}
+      >
+        <div className="relative min-h-0 flex-1">
+          {snapshot && city ? (
+            <>
+              {view === "tree" ? (
+                <TreeScene city={city} {...sceneProps} />
+              ) : (
+                <CityScene city={city} {...sceneProps} />
+              )}
+              <Hud
+                {...(trace && { trace })}
+                city={city}
+                editedNow={touchCounts.edited}
+                readNow={touchCounts.read}
+                seenNow={touchCounts.seen}
+                churn={churn}
+                onSelectFile={selectFile}
+              />
+              <Dock
+                panels={panels}
+                openSheet={openSheet}
+                openPop={openPop}
+                onToggle={togglePanel}
+                onClosePop={closePop}
+              />
+            </>
+          ) : (
+            <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+              {error ? `Could not load this thread's trace: ${error}` : "Building the map…"}
+            </div>
+          )}
 
-      <div className="absolute top-3 left-3 z-40 flex gap-1 rounded-md bg-black/50 p-1 text-xs text-white">
-        {(["terrain", "tree"] as const).map((candidate) => (
-          <button
-            key={candidate}
-            type="button"
-            onClick={() => setView(candidate)}
-            className={`rounded px-2 py-1 ${view === candidate ? "bg-white/20" : "hover:bg-white/10"}`}
-          >
-            {candidate}
-          </button>
-        ))}
+          {mapUnavailable ? (
+            <div className="mindwalk-glass absolute top-4 right-4 z-40 rounded-[--control-radius] border border-border px-2.5 py-1.5 text-muted-foreground text-xs">
+              No repository map for this thread — timeline only.
+            </div>
+          ) : null}
+        </div>
+
+        {snapshot ? (
+          <Timeline
+            {...(trace && { trace })}
+            currentSeq={seq}
+            onChange={setCurrentSeq}
+            playing={playing}
+            onPlayingChange={setPlaying}
+          />
+        ) : null}
       </div>
-
-      {snapshot ? (
-        <div className="absolute right-3 bottom-3 left-3 z-40 flex items-center gap-2 rounded-md bg-black/60 px-2 py-1.5 text-xs text-white">
-          <button
-            type="button"
-            onClick={() => setCurrentSeq(0)}
-            disabled={total === 0}
-            className="rounded p-1 hover:bg-white/10 disabled:opacity-40"
-            aria-label="Jump to the first event"
-          >
-            <SkipBack className="size-4" />
-          </button>
-          <button
-            type="button"
-            onClick={togglePlay}
-            disabled={total === 0}
-            className="rounded p-1 hover:bg-white/10 disabled:opacity-40"
-            aria-label={playing ? "Pause playback" : "Play playback"}
-          >
-            {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
-          </button>
-          <input
-            type="range"
-            min={0}
-            max={max}
-            value={seq}
-            disabled={total === 0}
-            onChange={(changeEvent) => setCurrentSeq(Number(changeEvent.target.value))}
-            className="min-w-0 flex-1 accent-white disabled:opacity-40"
-            aria-label="Playback position"
-          />
-          <button
-            type="button"
-            onClick={() => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]!)}
-            className="rounded px-1.5 py-1 font-mono hover:bg-white/10"
-            aria-label="Cycle playback speed"
-          >
-            {speed}x
-          </button>
-          <span className="shrink-0 font-mono tabular-nums text-white/70">
-            {total === 0 ? "no events" : `${seq + 1}/${total}`}
-          </span>
-          <span className="max-w-64 truncate text-white/70">{event?.summary ?? ""}</span>
-        </div>
-      ) : null}
-
-      {mapUnavailable ? (
-        <div className="absolute top-3 right-3 z-40 rounded-md bg-black/50 px-2 py-1 text-xs text-white/70">
-          No repository map for this thread — timeline only.
-        </div>
-      ) : null}
-    </div>
+    </TooltipProvider>
   );
 }

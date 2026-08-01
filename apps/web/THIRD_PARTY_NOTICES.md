@@ -14,7 +14,10 @@ upstream repository: <https://github.com/vscode-icons/vscode-icons/blob/master/L
 
 The 3D scene, playback, and trace/citymap type code under `src/mindwalk/` is
 ported from the [`mindwalk`](https://github.com/cosmtrek/mindwalk) project's
-`web/src` frontend (vendored in this repo at `.repos/mindwalk`).
+`web/src` frontend (vendored in this repo at `.repos/mindwalk`). The HUD,
+timeline, inspector, dock, and view-panel components under `src/mindwalk/ui/`
+are derived from the same source — their structure, prop contracts, and
+explanatory copy are upstream's, restyled onto this app's design tokens.
 
 Copyright (c) 2026 Ricko Yu
 

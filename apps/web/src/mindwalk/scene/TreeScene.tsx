@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { touchWord, type CityFile, type CityMap, type Touch } from "../types";
 import type { FilePlayback } from "../playback/reducer";
+import { paletteFor, type MindwalkTheme, type ScenePalette } from "../palette";
 import { DirLabelSet } from "./dirLabels";
 import {
   disposeGroup,
@@ -10,8 +11,7 @@ import {
   fitDistance,
   prefersReducedMotion,
   SceneTip,
-  SKY,
-  touchColors,
+  touchColorsFor,
 } from "./sceneUtils";
 import { computeTreeLayout, type TreeLayout } from "./treeLayout";
 import { ATTRACT_DRIFT_MS, FrameLoop } from "./frameLoop";
@@ -26,6 +26,8 @@ interface TreeSceneProps {
   onCanvasReady?: (canvas: HTMLCanvasElement | null) => void;
   // the scrubber is playing: the one state that earns a continuous frame loop
   playing?: boolean;
+  /** Which palette the stage renders in — see `../palette.ts`. */
+  theme: MindwalkTheme;
 }
 
 // Firefly tree: the repo is a radial tree — directories fork, files are
@@ -35,17 +37,31 @@ interface TreeSceneProps {
 // One variable, one channel: leaf color says WHAT happened (touch state),
 // halo radius says HOW MUCH (visits), branch brightness says WHERE the
 // light is, and the selection is a shape (ring + beam), never a recolor.
-const colors: Record<Touch | "unvisited" | "ghost" | "selected", THREE.Color> = {
-  unvisited: new THREE.Color("#5a6375"),
-  ghost: new THREE.Color("#4d5464"),
-  ...touchColors,
-};
-const EDGE_BASE = new THREE.Color("#3c424f");
-// branches leading to visited leaves brighten, but stay neutral: the branch
-// guides the eye, the leaf carries the classification
-const EDGE_LIT = new THREE.Color("#7d8496");
-// white-hot walker: keeps the firefly apart from edit-amber leaves
-const FIREFLY_HOT = new THREE.Color("#ffeeda");
+type SceneColors = Record<Touch | "unvisited" | "ghost" | "selected", THREE.Color>;
+
+function sceneColors(palette: ScenePalette): SceneColors {
+  return {
+    unvisited: new THREE.Color(palette.tree.unvisited),
+    ghost: new THREE.Color(palette.tree.ghost),
+    ...touchColorsFor(palette),
+  };
+}
+
+// Branches leading to visited leaves separate from the rest, but stay neutral:
+// the branch guides the eye, the leaf carries the classification. The lit pair
+// always moves away from the sky — brighter at night, darker by day.
+interface EdgeColors {
+  base: THREE.Color;
+  lit: THREE.Color;
+}
+
+function edgeColors(palette: ScenePalette): EdgeColors {
+  return {
+    base: new THREE.Color(palette.tree.edgeBase),
+    // held apart from the edit swatch so the walker never reads as an amber leaf
+    lit: new THREE.Color(palette.tree.edgeLit),
+  };
+}
 const LEAF_Y = 0.7;
 
 // halo radius encodes revisits only — touch type already lives in the leaf
@@ -71,7 +87,15 @@ export function TreeScene({
   onSelect,
   onCanvasReady,
   playing = false,
+  theme,
 }: TreeSceneProps) {
+  // A theme switch rebuilds the stage rather than mutating every material in
+  // place: it happens once in a blue moon, and the alternative is a second
+  // code path that has to stay in step with scene construction forever.
+  const palette = useMemo(() => paletteFor(theme).scene, [theme]);
+  const colors = useMemo(() => sceneColors(palette), [palette]);
+  // not `edges`: the branch-tinting effect already binds that name to the mesh
+  const edgeTint = useMemo(() => edgeColors(palette), [palette]);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const leafMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const ghostMeshRef = useRef<THREE.InstancedMesh | null>(null);
@@ -120,7 +144,7 @@ export function TreeScene({
     reducedRef.current = reduced;
 
     const scene = new THREE.Scene();
-    scene.background = SKY;
+    scene.background = new THREE.Color(palette.sky);
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(
@@ -167,9 +191,13 @@ export function TreeScene({
     });
     controlsRef.current = controls;
 
-    const sky = new THREE.HemisphereLight("#66779b", "#161922", 1.7);
+    const sky = new THREE.HemisphereLight(
+      palette.light.hemiSky,
+      palette.light.hemiGround,
+      palette.light.hemiIntensity,
+    );
     scene.add(sky);
-    const moon = new THREE.DirectionalLight("#b6c5de", 1.1);
+    const moon = new THREE.DirectionalLight(palette.light.sunColor, palette.light.sunIntensity);
     moon.position.set(-60, 120, -40);
     scene.add(moon);
 
@@ -349,7 +377,7 @@ export function TreeScene({
       scene.clear();
       onCanvasReady?.(null);
     };
-  }, [onSelect, onCanvasReady]);
+  }, [onSelect, onCanvasReady, palette]);
 
   // grow the skeleton: ground, edges, leaves, labels
   useEffect(() => {
@@ -366,7 +394,7 @@ export function TreeScene({
     const group = new THREE.Group();
     const size = layout.radius * 2.3;
 
-    scene.fog = new THREE.Fog(SKY, size * 2.1, size * 4.2);
+    scene.fog = new THREE.Fog(new THREE.Color(palette.sky), size * 2.1, size * 4.2);
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(size * 6, size * 6),
@@ -516,13 +544,13 @@ export function TreeScene({
 
     // directory labels: screen-space LOD in the render loop decides which
     // of the biggest subtrees show their name
-    labelSetRef.current = new DirLabelSet(layout.dirs, group, LABEL_Y);
+    labelSetRef.current = new DirLabelSet(layout.dirs, group, LABEL_Y, palette.labelInk);
 
     const firefly = new THREE.Sprite(
       new THREE.SpriteMaterial({
-        map: fireflyTexture(),
-        color: FIREFLY_HOT,
-        blending: THREE.AdditiveBlending,
+        map: fireflyTexture(palette.fireflyStops),
+        color: new THREE.Color(palette.tree.fireflyHot),
+        blending: palette.glowBlending,
         depthWrite: false,
         transparent: true,
         fog: false,
@@ -555,7 +583,7 @@ export function TreeScene({
         color: colors.selected,
         transparent: true,
         opacity: 0.32,
-        blending: THREE.AdditiveBlending,
+        blending: palette.glowBlending,
         depthWrite: false,
         toneMapped: false,
         fog: false,
@@ -566,7 +594,7 @@ export function TreeScene({
     group.add(beam);
     selectionRef.current = { ring, beam };
 
-    const trail = new TrailRenderer(1.6);
+    const trail = new TrailRenderer(1.6, palette);
     trailRef.current = trail;
     group.add(trail.object);
 
@@ -613,7 +641,7 @@ export function TreeScene({
       fireflyRef.current = null;
       labelSetRef.current = null;
     };
-  }, [city, layout]);
+  }, [city, layout, palette, colors]);
 
   // playback → leaf colors, halo targets, branch tinting
   useEffect(() => {
@@ -678,14 +706,14 @@ export function TreeScene({
       } else if (meta.childPath) {
         lit = litDirs.has(meta.childPath);
       }
-      const tinted = lit ? EDGE_LIT : EDGE_BASE;
+      const tinted = lit ? edgeTint.lit : edgeTint.base;
       for (let v = 0; v < meta.vertexCount; v++) {
         colorAttr.setXYZ(vertex++, tinted.r, tinted.g, tinted.b);
       }
     }
     colorAttr.needsUpdate = true;
     loopRef.current?.invalidate();
-  }, [city, layout, playback]);
+  }, [city, layout, playback, colors, edgeTint]);
 
   // selection marker follows the selected leaf
   useEffect(() => {
@@ -749,7 +777,7 @@ export function TreeScene({
       }),
     );
     loopRef.current?.invalidate();
-  }, [city, layout, playback]);
+  }, [city, layout, playback, colors, edgeTint]);
 
   // starting or stopping the walk switches the loop between continuous and
   // demand-driven; either edge needs a frame to act on it

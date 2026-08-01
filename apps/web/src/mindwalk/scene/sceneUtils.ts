@@ -1,20 +1,23 @@
 import * as THREE from "three";
+import type { ScenePalette } from "../palette";
 import type { Touch } from "../types";
 
 // Shared scene vocabulary. The touch colors are the meaning the HUD legend
 // promises; both scenes must draw them identically. Ambient colors (ground,
 // unvisited, ghost) stay per-scene tuning.
-export const SKY = new THREE.Color("#12151c");
-export const EMBER = new THREE.Color("#ff9e5e");
-
-export const touchColors: Record<Touch | "selected", THREE.Color> = {
-  hit: new THREE.Color("#8fb45f"),
-  // chromatic enough to read as blue on lit terrain columns — a paler tint
-  // washed out to white and stopped matching the HUD legend
-  read: new THREE.Color("#a5c8f1"),
-  edit: new THREE.Color("#f0ad5a"),
-  selected: new THREE.Color("#f6ead2"),
-};
+//
+// The values themselves live in `../palette.ts`, alongside the swatches the
+// chrome draws from them — mindwalk kept two copies and they had already
+// drifted. Materialized per scene rather than shared: callers `lerp` and
+// `offsetHSL` these, and a shared instance would leak one scene's edit.
+export function touchColorsFor(palette: ScenePalette): Record<Touch | "selected", THREE.Color> {
+  return {
+    hit: new THREE.Color(palette.touch.hit),
+    read: new THREE.Color(palette.touch.read),
+    edit: new THREE.Color(palette.touch.edit),
+    selected: new THREE.Color(palette.touch.selected),
+  };
+}
 
 // Distance along `dir` that fits every point inside the camera frustum.
 // Returns null while the viewport has no usable aspect (hidden pane, tab in

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { EMBER } from "./sceneUtils";
+import type { ScenePalette } from "../palette";
 
 const SAMPLES = 14;
 const MAX_ARCS = 11; // playback keeps 12 recent targets → at most 11 arcs
@@ -16,9 +16,17 @@ export class TrailRenderer {
   private readonly mid = new THREE.Vector3();
   private readonly curve = new THREE.QuadraticBezierCurve3();
   private readonly color = new THREE.Color();
+  private readonly ember: THREE.Color;
+  private readonly sky: THREE.Color;
+  /** Emitted light fades by dimming toward nothing; absorbed ink fades by
+   * receding toward the paper. Same ramp, opposite direction. */
+  private readonly fadesToSky: boolean;
 
-  constructor(lift: number) {
+  constructor(lift: number, palette: ScenePalette) {
     this.lift = lift;
+    this.ember = new THREE.Color(palette.ember);
+    this.sky = new THREE.Color(palette.sky);
+    this.fadesToSky = palette.glowBlending !== THREE.AdditiveBlending;
     const vertexCount = MAX_ARCS * SAMPLES * 2;
     const geometry = new THREE.BufferGeometry();
     this.positions = new THREE.BufferAttribute(new Float32Array(vertexCount * 3), 3);
@@ -31,7 +39,7 @@ export class TrailRenderer {
     const material = new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
-      blending: THREE.AdditiveBlending,
+      blending: palette.glowBlending,
       depthWrite: false,
       fog: false,
     });
@@ -60,7 +68,9 @@ export class TrailRenderer {
         this.curve.getPoint(s / SAMPLES, this.arcPoints[s]!);
       }
       const recency = i / arcs;
-      this.color.copy(EMBER).multiplyScalar(0.05 + 0.95 * recency * recency);
+      const strength = 0.05 + 0.95 * recency * recency;
+      if (this.fadesToSky) this.color.copy(this.sky).lerp(this.ember, strength);
+      else this.color.copy(this.ember).multiplyScalar(strength);
       for (let s = 0; s < SAMPLES; s++) {
         const pa = this.arcPoints[s]!;
         const pb = this.arcPoints[s + 1]!;
