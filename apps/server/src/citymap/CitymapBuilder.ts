@@ -147,9 +147,6 @@ export const make = Effect.gen(function* () {
           new CitymapBuildError({
             root,
             operation: "listWorkspaceFilesTruncated",
-            cause: new Error(
-              `Workspace file listing for ${root} exceeded the driver's output cap.`,
-            ),
           }),
         );
       }
