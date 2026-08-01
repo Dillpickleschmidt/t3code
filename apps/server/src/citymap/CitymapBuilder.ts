@@ -72,7 +72,12 @@ export class CitymapBuildError extends Schema.TaggedErrorClass<CitymapBuildError
   "CitymapBuildError",
   {
     root: Schema.String,
-    operation: Schema.Literals(["listWorkspaceFiles", "readDirectory"]),
+    operation: Schema.Literals([
+      "listWorkspaceFiles",
+      "listWorkspaceFilesTruncated",
+      "readDirectory",
+      "stat",
+    ]),
     cause: Schema.Defect(),
   },
 ) {
@@ -133,6 +138,21 @@ export const make = Effect.gen(function* () {
       const listed = yield* handle
         .listWorkspaceFiles(root)
         .pipe(Effect.mapError(failBuild(root, "listWorkspaceFiles")));
+      // A truncated listing would silently yield a partial map of the
+      // codebase, which is worse than no map at all when the whole point is
+      // that every file has a fixed place. mindwalk reads git's output
+      // uncapped and has no equivalent case.
+      if (listed.truncated) {
+        return yield* Effect.fail(
+          new CitymapBuildError({
+            root,
+            operation: "listWorkspaceFilesTruncated",
+            cause: new Error(
+              `Workspace file listing for ${root} exceeded the driver's output cap.`,
+            ),
+          }),
+        );
+      }
       if (listed.paths.length > 0) {
         return listed.paths;
       }
@@ -159,8 +179,10 @@ export const make = Effect.gen(function* () {
     const collected: Array<string> = [];
     for (const entry of entries.sort()) {
       const absolute = path.join(directory, entry);
-      const info = yield* fileSystem.stat(absolute).pipe(Effect.orElseSucceed(() => null));
-      if (!info) continue;
+      // Go's WalkDir surfaces lstat failures rather than skipping the entry;
+      // only the later inspect phase tolerates them (mindwalk's `continue` on
+      // inspectFile error). Skipping here would cache a partial citymap.
+      const info = yield* fileSystem.stat(absolute).pipe(Effect.mapError(failBuild(root, "stat")));
       if (info.type === "Directory") {
         if (FALLBACK_WALK_SKIP_DIRECTORIES.has(entry)) continue;
         // `stat` follows symlinks, so a link to a directory would otherwise be
