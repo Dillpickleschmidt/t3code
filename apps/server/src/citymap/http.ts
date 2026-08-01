@@ -9,14 +9,14 @@ import {
   failEnvironmentNotFound,
   requireEnvironmentScope,
 } from "../auth/http.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as CitymapBuilder from "./CitymapBuilder.ts";
 
 export const citymapHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
   "citymap",
   Effect.fnUntraced(function* (handlers) {
-    const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+    const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
     const citymapBuilder = yield* CitymapBuilder.CitymapBuilder;
 
     return handlers.handle(
