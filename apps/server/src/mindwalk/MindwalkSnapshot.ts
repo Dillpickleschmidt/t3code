@@ -148,7 +148,11 @@ export const make = Effect.gen(function* () {
       trace: finalizeTrace(trace, citymap),
       citymap,
     };
-    cache.set(cacheKey, { fingerprint, snapshot });
+    // Never memoize a degraded result. The fallback's repo block is
+    // indistinguishable from a successful build's on a non-git root — same
+    // root, no commit, not dirty — so caching it would make the empty map
+    // permanent even once the build starts succeeding.
+    if (!citymapFailed) cache.set(cacheKey, { fingerprint, snapshot });
     evictOldest(cache);
     yield* Effect.annotateCurrentSpan({
       "mindwalk.cache": "miss",
