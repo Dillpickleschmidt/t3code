@@ -11,3 +11,20 @@ limited to what this repo's stricter tsconfig forces (non-null assertions and
 casts, all erased at runtime) plus the pre-commit `vp fmt` autoformat, and each
 must preserve behavior. Diff against `.repos/mindwalk/web/src` before editing
 anything here.
+
+## Deliberate deviations from verbatim
+
+One behavioral deviation is intentional and permanent, because AGENTS.md's
+"no continuously repainting animations" rule outranks fidelity here:
+
+- **`scene/frameLoop.ts` is ours, not mindwalk's.** Both scenes drive it
+  instead of mindwalk's unconditional `requestAnimationFrame` loop, so a
+  visible but idle scene issues zero draw calls. See the file's header for the
+  three inputs that book a frame.
+- **`controls.autoRotate` is off.** Mindwalk drifts the camera until the user
+  takes over; that is unbounded idle motion with no bounded form, so it is
+  dropped rather than special-cased.
+- **The firefly's sine pulse only runs while playback is running**, gated by
+  the `playing` prop both scenes now take.
+- **`DirLabelSet.ease`, and the height/halo lerps, report whether they moved.**
+  The loop needs to know when an animation has finished; upstream never asked.
