@@ -14,7 +14,7 @@ anything here.
 
 ## Deliberate deviations from verbatim
 
-One behavioral deviation is intentional and permanent, because AGENTS.md's
+These behavioral deviations are intentional and permanent, because AGENTS.md's
 "no continuously repainting animations" rule outranks fidelity here:
 
 - **`scene/frameLoop.ts` is ours, not mindwalk's.** Both scenes drive it
