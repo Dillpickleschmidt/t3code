@@ -3,13 +3,16 @@ import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import { NonNegativeInt } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
 import { toPersistenceDecodeError, toPersistenceSqlError } from "../Errors.ts";
 
 import {
+  CountProjectionThreadActivitiesInput,
   DeleteProjectionThreadActivitiesInput,
+  ListProjectionThreadActivitiesByKindInput,
   ListProjectionThreadActivitiesInput,
   ProjectionThreadActivity,
   ProjectionThreadActivityRepository,
@@ -97,6 +100,43 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
       `,
   });
 
+  const listProjectionThreadActivityRowsByKind = SqlSchema.findAll({
+    Request: ListProjectionThreadActivitiesByKindInput,
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: ({ threadId, kinds }) =>
+      sql`
+        SELECT
+          activity_id AS "activityId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          tone,
+          kind,
+          summary,
+          payload_json AS "payload",
+          sequence,
+          created_at AS "createdAt"
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
+          AND ${sql.in("kind", kinds)}
+        ORDER BY
+          CASE WHEN sequence IS NULL THEN 0 ELSE 1 END ASC,
+          sequence ASC,
+          created_at ASC,
+          activity_id ASC
+      `,
+  });
+
+  const countProjectionThreadActivityRows = SqlSchema.findOneOption({
+    Request: CountProjectionThreadActivitiesInput,
+    Result: Schema.Struct({ count: NonNegativeInt }),
+    execute: ({ threadId }) =>
+      sql`
+        SELECT COUNT(*) AS "count"
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
+      `,
+  });
+
   const deleteProjectionThreadActivityRows = SqlSchema.void({
     Request: DeleteProjectionThreadActivitiesInput,
     execute: ({ threadId }) =>
@@ -124,19 +164,32 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
           "ProjectionThreadActivityRepository.listByThreadId:decodeRows",
         ),
       ),
-      Effect.map((rows) =>
-        rows.map((row) => ({
-          activityId: row.activityId,
-          threadId: row.threadId,
-          turnId: row.turnId,
-          tone: row.tone,
-          kind: row.kind,
-          summary: row.summary,
-          payload: row.payload,
-          ...(row.sequence !== null ? { sequence: row.sequence } : {}),
-          createdAt: row.createdAt,
-        })),
+      Effect.map((rows) => rows.map(toActivity)),
+    );
+
+  const listByThreadIdAndKinds: ProjectionThreadActivityRepositoryShape["listByThreadIdAndKinds"] =
+    (input) =>
+      input.kinds.length === 0
+        ? Effect.succeed([])
+        : listProjectionThreadActivityRowsByKind(input).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionThreadActivityRepository.listByThreadIdAndKinds:query",
+                "ProjectionThreadActivityRepository.listByThreadIdAndKinds:decodeRows",
+              ),
+            ),
+            Effect.map((rows) => rows.map(toActivity)),
+          );
+
+  const countByThreadId: ProjectionThreadActivityRepositoryShape["countByThreadId"] = (input) =>
+    countProjectionThreadActivityRows(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionThreadActivityRepository.countByThreadId:query",
+          "ProjectionThreadActivityRepository.countByThreadId:decodeRows",
+        ),
       ),
+      Effect.map(Option.match({ onNone: () => 0, onSome: (row) => row.count })),
     );
 
   const deleteByThreadId: ProjectionThreadActivityRepositoryShape["deleteByThreadId"] = (input) =>
@@ -149,9 +202,28 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
   return {
     upsert,
     listByThreadId,
+    listByThreadIdAndKinds,
+    countByThreadId,
     deleteByThreadId,
   } satisfies ProjectionThreadActivityRepositoryShape;
 });
+
+/** The db row's nullable `sequence` becomes an optional key on the activity. */
+function toActivity(
+  row: typeof ProjectionThreadActivityDbRowSchema.Type,
+): ProjectionThreadActivity {
+  return {
+    activityId: row.activityId,
+    threadId: row.threadId,
+    turnId: row.turnId,
+    tone: row.tone,
+    kind: row.kind,
+    summary: row.summary,
+    payload: row.payload,
+    ...(row.sequence !== null ? { sequence: row.sequence } : {}),
+    createdAt: row.createdAt,
+  };
+}
 
 export const ProjectionThreadActivityRepositoryLive = Layer.effect(
   ProjectionThreadActivityRepository,

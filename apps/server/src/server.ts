@@ -108,6 +108,8 @@ import {
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import * as CitymapBuilder from "./citymap/CitymapBuilder.ts";
 import { citymapHttpApiLayer } from "./citymap/http.ts";
+import * as MindwalkSnapshot from "./mindwalk/MindwalkSnapshot.ts";
+import { mindwalkHttpApiLayer } from "./mindwalk/http.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
@@ -345,7 +347,13 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
-const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+const RuntimeCoreDependenciesLive = Layer.mergeAll(
+  ReactorLayerLive,
+  // The snapshot service reads across the citymap builder, the projection
+  // query, and two projection repositories, so it sits at the top of the
+  // dependency chain rather than inside any one of those groups.
+  MindwalkSnapshot.layer,
+).pipe(
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
   Layer.provideMerge(CheckpointingLayerLive),
@@ -414,6 +422,7 @@ export const makeRoutesLayer = Layer.mergeAll(
       Layer.provide(connectHttpApiLayer),
       Layer.provide(orchestrationHttpApiLayer),
       Layer.provide(citymapHttpApiLayer),
+      Layer.provide(mindwalkHttpApiLayer),
       Layer.provide(serverEnvironmentHttpApiLayer),
       Layer.provide(environmentAuthenticatedAuthLayer),
     ),

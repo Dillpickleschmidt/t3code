@@ -44,6 +44,18 @@ export const DeleteProjectionThreadActivitiesInput = Schema.Struct({
 export type DeleteProjectionThreadActivitiesInput =
   typeof DeleteProjectionThreadActivitiesInput.Type;
 
+export const ListProjectionThreadActivitiesByKindInput = Schema.Struct({
+  threadId: ThreadId,
+  kinds: Schema.Array(Schema.String),
+});
+export type ListProjectionThreadActivitiesByKindInput =
+  typeof ListProjectionThreadActivitiesByKindInput.Type;
+
+export const CountProjectionThreadActivitiesInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type CountProjectionThreadActivitiesInput = typeof CountProjectionThreadActivitiesInput.Type;
+
 /**
  * ProjectionThreadActivityRepositoryShape - Service API for projected thread activity.
  */
@@ -66,6 +78,31 @@ export interface ProjectionThreadActivityRepositoryShape {
   readonly listByThreadId: (
     input: ListProjectionThreadActivitiesInput,
   ) => Effect.Effect<ReadonlyArray<ProjectionThreadActivity>, ProjectionRepositoryError>;
+
+  /**
+   * List projected thread activity rows of specific kinds, in the same order
+   * as `listByThreadId`.
+   *
+   * Filtering in SQL rather than in memory is what makes this affordable on a
+   * long thread: the largest thread in a real store is 8,011 activities, of
+   * which the trace projection wants 1,283 — the rest is tens of megabytes of
+   * `payload_json` that would otherwise be read and JSON-parsed to be thrown
+   * away.
+   */
+  readonly listByThreadIdAndKinds: (
+    input: ListProjectionThreadActivitiesByKindInput,
+  ) => Effect.Effect<ReadonlyArray<ProjectionThreadActivity>, ProjectionRepositoryError>;
+
+  /**
+   * Count every projected activity row for a thread.
+   *
+   * Activities are append-only per thread, never updated or deleted in place,
+   * so the count is an exact fingerprint of the thread's activity log — which
+   * is what lets a derived artifact cache on it with no TTL.
+   */
+  readonly countByThreadId: (
+    input: CountProjectionThreadActivitiesInput,
+  ) => Effect.Effect<number, ProjectionRepositoryError>;
 
   /**
    * Delete projected thread activity rows by thread.

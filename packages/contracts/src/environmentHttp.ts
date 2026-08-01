@@ -43,6 +43,7 @@ import {
   RelayEnvironmentMintResponse,
   RelayLinkProofRequest,
 } from "./relay.ts";
+import { MindwalkSnapshot } from "./trace.ts";
 
 const OptionalBearerHeaders = Schema.Struct({
   authorization: Schema.optionalKey(Schema.String),
@@ -86,6 +87,7 @@ export const EnvironmentInternalErrorReason = Schema.Literals([
   "orchestration_thread_snapshot_failed",
   "orchestration_dispatch_failed",
   "citymap_build_failed",
+  "trace_projection_failed",
   "internal_error",
 ]);
 export type EnvironmentInternalErrorReason = typeof EnvironmentInternalErrorReason.Type;
@@ -509,6 +511,34 @@ export class EnvironmentCitymapHttpApi extends HttpApiGroup.make("citymap").add(
   }).middleware(EnvironmentAuthenticatedAuth),
 ) {}
 
+const EnvironmentMindwalkParams = Schema.Struct({
+  threadId: ThreadId,
+});
+
+/**
+ * `lens` picks the slice of the thread the trace covers: `main` (the default)
+ * is the root agent's own work, `agent:<launchCallId>` one subagent launch's
+ * subtree.
+ */
+const EnvironmentMindwalkQuery = Schema.Struct({
+  lens: Schema.optional(Schema.String),
+});
+
+/**
+ * The trace and the citymap ship together, and over HTTP for the same reason
+ * the citymap does: the pair is hundreds of kilobytes gzipped, and the citymap
+ * wants sending once rather than once per artifact.
+ */
+export class EnvironmentMindwalkHttpApi extends HttpApiGroup.make("mindwalk").add(
+  HttpApiEndpoint.get("threadSnapshot", "/api/mindwalk/threads/:threadId", {
+    headers: OptionalBearerHeaders,
+    params: EnvironmentMindwalkParams,
+    query: EnvironmentMindwalkQuery,
+    success: MindwalkSnapshot,
+    error: EnvironmentOrchestrationThreadSnapshotErrors,
+  }).middleware(EnvironmentAuthenticatedAuth),
+) {}
+
 export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   .add(
     HttpApiEndpoint.post("linkProof", "/api/connect/link-proof", {
@@ -575,4 +605,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentAuthHttpApi)
   .add(EnvironmentOrchestrationHttpApi)
   .add(EnvironmentCitymapHttpApi)
+  .add(EnvironmentMindwalkHttpApi)
   .add(EnvironmentConnectHttpApi) {}
