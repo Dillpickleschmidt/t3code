@@ -10,6 +10,8 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as CitymapBuilder from "./CitymapBuilder.ts";
+import goldenCitymap from "./__fixtures__/mindwalk-citymap.golden.json" with { type: "json" };
+import goldenTree from "./__fixtures__/tree.json" with { type: "json" };
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), { prefix: "t3-citymap-" });
 
@@ -42,6 +44,26 @@ const writeFile = Effect.fn("writeFile")(function* (
   yield* typeof contents === "string"
     ? fileSystem.writeFileString(absolute, contents)
     : fileSystem.writeFile(absolute, contents);
+});
+
+/**
+ * A fixture tree and the citymap the real mindwalk binary produces for it,
+ * captured from `GET /api/repomap` at the pinned `v0.3.0`. Regenerate both
+ * together if the tree changes; `repo` is stripped because it records where
+ * and when the capture ran.
+ */
+const fixtureTree: Record<string, { text?: string; repeat?: number; base64?: string }> = goldenTree;
+
+const materializeFixtureTree = Effect.fn("materializeFixtureTree")(function* (root: string) {
+  for (const [relativePath, spec] of Object.entries(fixtureTree)) {
+    const contents =
+      spec.base64 !== undefined
+        ? Uint8Array.from(Buffer.from(spec.base64, "base64"))
+        : spec.repeat
+          ? spec.text!.repeat(spec.repeat)
+          : spec.text!;
+    yield* writeFile(root, relativePath, contents);
+  }
 });
 
 const makeRepo = Effect.fn("makeRepo")(function* () {
@@ -151,6 +173,45 @@ it.layer(CitymapTestLayer)("CitymapBuilder", (it) => {
 
       const third = yield* builder.buildForRoot(root);
       assert.strictEqual(third, second);
+    }),
+  );
+
+  it.effect("matches the real mindwalk binary byte for byte on a fixture tree", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRepo();
+      yield* materializeFixtureTree(root);
+      yield* runGit(root, ["add", "-A"]);
+      yield* runGit(root, ["commit", "-m", "fixture"]);
+
+      const builder = yield* CitymapBuilder.CitymapBuilder;
+      const city = yield* builder.buildForRoot(root);
+
+      // `repo` records the absolute root, HEAD, and build time, none of which
+      // survive a move between machines. Everything else — ids, ordering,
+      // line counts, langs, and every treemap rect — must match exactly.
+      const { repo: _repo, ...actual } = city;
+      assert.deepStrictEqual(JSON.parse(JSON.stringify(actual)), goldenCitymap);
+    }),
+  );
+
+  it.effect("collapses concurrent builds of one root into a single walk", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRepo();
+      yield* writeFile(root, "a.txt", "one\n");
+      yield* runGit(root, ["add", "."]);
+      yield* runGit(root, ["commit", "-m", "first"]);
+
+      const builder = yield* CitymapBuilder.CitymapBuilder;
+      // Both start before either finishes, so the cache is empty for both.
+      // Identical references can then only mean the second joined the first
+      // rather than walking the tree again.
+      const [first, second, third] = yield* Effect.all(
+        [builder.buildForRoot(root), builder.buildForRoot(root), builder.buildForRoot(root)],
+        { concurrency: "unbounded" },
+      );
+
+      assert.strictEqual(second, first);
+      assert.strictEqual(third, first);
     }),
   );
 

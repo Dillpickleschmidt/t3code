@@ -1,0 +1,42 @@
+{
+  "README.md": {
+    "text": "# Sample\n\nA fixture tree.\n"
+  },
+  "main.go": {
+    "text": "package main\n\nfunc main() {}\n"
+  },
+  "no-trailing-newline.go": {
+    "text": "package main\nfunc New() {}"
+  },
+  "empty.txt": {
+    "text": ""
+  },
+  "config.json": {
+    "text": "{\n  \"a\": 1\n}\n"
+  },
+  "styles.css": {
+    "text": "body { margin: 0; }\n"
+  },
+  "notes": {
+    "text": "extensionless file, still text\n"
+  },
+  ".hidden": {
+    "text": "dotfile is all extension\n"
+  },
+  "assets/logo.png": {
+    "base64": "iVBORw0KGgoAAAANSUhEUg=="
+  },
+  "assets/blob.dat": {
+    "base64": "AAECA2hlbGxvAAB3b3JsZAo="
+  },
+  "src/deep/nested/util.ts": {
+    "text": "export const x = 1;\nexport const y = 2;\n"
+  },
+  "src/deep/nested/other.py": {
+    "text": "def f():\n    return 1\n"
+  },
+  "src/big.txt": {
+    "text": "0123456789abcdef\n",
+    "repeat": 512
+  }
+}

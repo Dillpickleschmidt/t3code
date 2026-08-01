@@ -1,0 +1,254 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "id": 0,
+      "path": ".hidden",
+      "dir": "",
+      "lines": 1,
+      "bytes": 25,
+      "lang": "hidden",
+      "rect": {
+        "x": 0.08,
+        "z": 65.71017928136327,
+        "w": 59.84,
+        "d": 13.432455179659186
+      },
+      "ghost": false
+    },
+    {
+      "id": 1,
+      "path": "README.md",
+      "dir": "",
+      "lines": 3,
+      "bytes": 26,
+      "lang": "markdown",
+      "rect": {
+        "x": 60.08,
+        "z": 65.71017928136327,
+        "w": 59.84,
+        "d": 13.432455179659186
+      },
+      "ghost": false
+    },
+    {
+      "id": 2,
+      "path": "assets/blob.dat",
+      "dir": "assets",
+      "lines": 1,
+      "bytes": 17,
+      "lang": "dat",
+      "rect": {
+        "x": 95.30718625761429,
+        "z": 0.16,
+        "w": 24.532813742385706,
+        "d": 32.57508964068164
+      },
+      "ghost": false
+    },
+    {
+      "id": 3,
+      "path": "assets/logo.png",
+      "dir": "assets",
+      "lines": 1,
+      "bytes": 16,
+      "lang": "png",
+      "rect": {
+        "x": 95.30718625761429,
+        "z": 32.89508964068163,
+        "w": 24.532813742385706,
+        "d": 32.57508964068164
+      },
+      "ghost": false
+    },
+    {
+      "id": 4,
+      "path": "config.json",
+      "dir": "",
+      "lines": 3,
+      "bytes": 13,
+      "lang": "json",
+      "rect": {
+        "x": 0.08,
+        "z": 79.30263446102245,
+        "w": 59.84,
+        "d": 13.432455179659186
+      },
+      "ghost": false
+    },
+    {
+      "id": 5,
+      "path": "empty.txt",
+      "dir": "",
+      "lines": 0,
+      "bytes": 0,
+      "lang": "txt",
+      "rect": {
+        "x": 60.08,
+        "z": 79.30263446102245,
+        "w": 59.84,
+        "d": 13.432455179659186
+      },
+      "ghost": false
+    },
+    {
+      "id": 6,
+      "path": "main.go",
+      "dir": "",
+      "lines": 3,
+      "bytes": 29,
+      "lang": "go",
+      "rect": {
+        "x": 0.08,
+        "z": 92.89508964068163,
+        "w": 59.84,
+        "d": 13.432455179659186
+      },
+      "ghost": false
+    },
+    {
+      "id": 7,
+      "path": "no-trailing-newline.go",
+      "dir": "",
+      "lines": 2,
+      "bytes": 26,
+      "lang": "go",
+      "rect": {
+        "x": 60.08,
+        "z": 92.89508964068163,
+        "w": 59.84,
+        "d": 13.432455179659186
+      },
+      "ghost": false
+    },
+    {
+      "id": 8,
+      "path": "notes",
+      "dir": "",
+      "lines": 1,
+      "bytes": 31,
+      "lang": "text",
+      "rect": {
+        "x": 0.08,
+        "z": 106.48754482034082,
+        "w": 59.84,
+        "d": 13.432455179659186
+      },
+      "ghost": false
+    },
+    {
+      "id": 9,
+      "path": "src/big.txt",
+      "dir": "src",
+      "lines": 512,
+      "bytes": 8704,
+      "lang": "txt",
+      "rect": {
+        "x": 0.16,
+        "z": 0.16,
+        "w": 70.0161651352228,
+        "d": 65.31017928136328
+      },
+      "ghost": false
+    },
+    {
+      "id": 10,
+      "path": "src/deep/nested/other.py",
+      "dir": "src/deep/nested",
+      "lines": 2,
+      "bytes": 22,
+      "lang": "python",
+      "rect": {
+        "x": 70.4961651352228,
+        "z": 0.32,
+        "w": 24.331021122391494,
+        "d": 32.41508964068164
+      },
+      "ghost": false
+    },
+    {
+      "id": 11,
+      "path": "src/deep/nested/util.ts",
+      "dir": "src/deep/nested",
+      "lines": 2,
+      "bytes": 40,
+      "lang": "typescript",
+      "rect": {
+        "x": 70.4961651352228,
+        "z": 32.89508964068164,
+        "w": 24.331021122391494,
+        "d": 32.415089640681636
+      },
+      "ghost": false
+    },
+    {
+      "id": 12,
+      "path": "styles.css",
+      "dir": "",
+      "lines": 1,
+      "bytes": 20,
+      "lang": "css",
+      "rect": {
+        "x": 60.08,
+        "z": 106.48754482034082,
+        "w": 59.84,
+        "d": 13.432455179659186
+      },
+      "ghost": false
+    }
+  ],
+  "dirs": [
+    {
+      "path": "src",
+      "depth": 1,
+      "rect": {
+        "x": 0.08,
+        "z": 0.08,
+        "w": 94.9871862576143,
+        "d": 65.47017928136327
+      },
+      "fileCount": 3,
+      "lines": 516
+    },
+    {
+      "path": "src/deep",
+      "depth": 2,
+      "rect": {
+        "x": 70.3361651352228,
+        "z": 0.16,
+        "w": 24.651021122391494,
+        "d": 65.31017928136328
+      },
+      "fileCount": 2,
+      "lines": 4
+    },
+    {
+      "path": "src/deep/nested",
+      "depth": 3,
+      "rect": {
+        "x": 70.4161651352228,
+        "z": 0.24,
+        "w": 24.491021122391494,
+        "d": 65.15017928136328
+      },
+      "fileCount": 2,
+      "lines": 4
+    },
+    {
+      "path": "assets",
+      "depth": 1,
+      "rect": {
+        "x": 95.22718625761429,
+        "z": 0.08,
+        "w": 24.692813742385706,
+        "d": 65.47017928136327
+      },
+      "fileCount": 2,
+      "lines": 2
+    }
+  ],
+  "layout": {
+    "algorithm": "squarified-treemap-v1",
+    "weight": "sqrt(max(lines, bytes/4096, 16))"
+  }
+}
