@@ -393,6 +393,7 @@ const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
 // three.js and the ported scenes load only when this surface is opened, so a
 // workspace that never opens it pays nothing for them.
 const WatchAgentSurface = lazy(() => import("../mindwalk/WatchAgentSurface"));
+const DiffSurface = lazy(() => import("../mindwalk/DiffSurface"));
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
@@ -2449,6 +2450,10 @@ function ChatViewContent(props: ChatViewProps) {
       })
     : null;
   const gitStatusCwd = activeThread?.worktreePath ?? gitCwd;
+  // 3D Diff is repository-scoped, like the 2D panel it sits beside, so it
+  // takes the same working directory git status is read at rather than a
+  // thread id — and remounts when that moves.
+  const diff3dCwd = gitStatusCwd;
   const gitStatusQuery = useEnvironmentQuery(
     gitStatusCwd === null
       ? null
@@ -3139,6 +3144,10 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef || !isServerThread) return;
     useRightPanelStore.getState().open(activeThreadRef, "watch3d");
   }, [activeThreadRef, isServerThread]);
+  const addDiff3dSurface = useCallback(() => {
+    if (!activeThreadRef || !isServerThread || !isGitRepo) return;
+    useRightPanelStore.getState().open(activeThreadRef, "diff3d");
+  }, [activeThreadRef, isGitRepo, isServerThread]);
   const openFileSurface = useCallback(
     (relativePath: string) => {
       if (!activeThreadRef || !activeProject) return;
@@ -5702,6 +5711,10 @@ function ChatViewContent(props: ChatViewProps) {
       <Suspense fallback={null}>
         <WatchAgentSurface key={activeThreadKey} threadId={activeThreadRef.threadId} />
       </Suspense>
+    ) : activeRightPanelSurface?.kind === "diff3d" && diff3dCwd ? (
+      <Suspense fallback={null}>
+        <DiffSurface key={diff3dCwd} cwd={diff3dCwd} />
+      </Suspense>
     ) : activeRightPanelSurface?.kind === "plan" ? (
       <PlanSidebar
         activePlan={activePlan}
@@ -6146,10 +6159,12 @@ function ChatViewContent(props: ChatViewProps) {
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
           onAddWatch3d={addWatch3dSurface}
+          onAddDiff3d={addDiff3dSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
           watch3dAvailable={isServerThread}
+          diff3dAvailable={isServerThread && isGitRepo}
         >
           {rightPanelContent}
         </RightPanelTabs>
@@ -6175,10 +6190,12 @@ function ChatViewContent(props: ChatViewProps) {
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
             onAddWatch3d={addWatch3dSurface}
+            onAddDiff3d={addDiff3dSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
             watch3dAvailable={isServerThread}
+            diff3dAvailable={isServerThread && isGitRepo}
           >
             {rightPanelContent}
           </RightPanelTabs>

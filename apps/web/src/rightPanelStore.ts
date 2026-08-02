@@ -5,7 +5,7 @@
  * surface descriptors and the active surface, while each feature continues to
  * own its durable resource state. Browser surfaces point at preview tab ids,
  * terminal surfaces point at terminal session ids, file surfaces point at
- * workspace paths, and diff/plan/files/watch3d remain singleton surfaces.
+ * workspace paths, and diff/diff3d/plan/files/watch3d remain singleton surfaces.
  */
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
@@ -22,6 +22,7 @@ export const RIGHT_PANEL_KINDS = [
   "preview",
   "terminal",
   "watch3d",
+  "diff3d",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -46,7 +47,8 @@ export type RightPanelSurface =
       revealRequestId: number;
     }
   | { id: "plan"; kind: "plan" }
-  | { id: "watch3d"; kind: "watch3d" };
+  | { id: "watch3d"; kind: "watch3d" }
+  | { id: "diff3d"; kind: "diff3d" };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 const RIGHT_PANEL_STORAGE_VERSION = 7;
@@ -103,6 +105,8 @@ const singletonSurface = (
       return { id: "plan", kind };
     case "watch3d":
       return { id: "watch3d", kind };
+    case "diff3d":
+      return { id: "diff3d", kind };
   }
 };
 

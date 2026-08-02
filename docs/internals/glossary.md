@@ -155,6 +155,18 @@ What sizes a building: `sqrt(max(lines, bytes/4096, 16))`. Lines dominate for so
 
 A citymap building for a path that no longer exists on disk, kept so history that touched the file still has somewhere to land. Ghosts carry no lines or bytes. See [CitymapLayout.ts][25].
 
+#### Diff overlay
+
+Per-file, per-commit churn over a range of commits, plus the citymap it lands on — what the 3D Diff surface scrubs. Each step carries only its own change and the client sums steps 1.._i_ for the frame at position _i_; the last step is the uncommitted working tree. Unlike the trace it has no mindwalk counterpart: mindwalk visualises what an agent did, this visualises what a range of commits changed. Built by [DiffOverlay.ts][27], typed in [the contracts][1], and served at `GET /api/mindwalk/diff?cwd=` — keyed by working directory rather than by thread, because it is a view of a repository.
+
+#### Churn
+
+Additions plus deletions, deliberately not the net diff: a line added and later removed counts twice. It is what sizes a diff column, because the surface is asking "how much work landed here", not "what does the patch say". A file touched in more than one commit therefore reads higher than `git diff` reports for the same range.
+
+#### Column
+
+One file's terrain column, as one or more stacked segments with a height and a colour each. It is the only thing the 3D scenes' drive modes differ in — attention, file size, and diff are each a plain function to a `Column[]`, so meshes, picking, labels, camera, and selection are shared. A diff column is one file with two segments, additions under deletions. See [columns.ts][28].
+
 ## Practical Shortcuts
 
 - If you see `requested`, think "intent recorded".
@@ -196,3 +208,5 @@ A citymap building for a path that no longer exists on disk, kept so history tha
 [24]: ./overview.md
 [25]: ../../apps/server/src/citymap/CitymapLayout.ts
 [26]: ../../apps/server/src/citymap/CitymapBuilder.ts
+[27]: ../../apps/server/src/mindwalk/DiffOverlay.ts
+[28]: ../../apps/web/src/mindwalk/scene/columns.ts
