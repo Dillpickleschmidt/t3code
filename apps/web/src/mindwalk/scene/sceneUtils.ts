@@ -50,6 +50,47 @@ export function fitDistance(
 // holds) until `world` projects inside the viewport's safe area. The right
 // margin reserves room for the inspector panel, which would otherwise sit
 // exactly on top of the leaf the user just selected.
+/**
+ * How much of the canvas the open inspector actually covers, in CSS pixels.
+ *
+ * mindwalk reserves a fixed 348px on the right, which is right for its stage:
+ * the inspector is a column there and the reserve is a fair share of a wide
+ * page. In a surface panel it is neither — the dock re-lays out below 900px
+ * and the inspector becomes a short card near the bottom — and guessing the
+ * wrong edge pans the whole stage away on every selection. Measuring the
+ * element removes the guess: nothing open reserves nothing, and whatever is
+ * open reserves exactly its own overlap.
+ */
+export function inspectorInsets(canvas: HTMLCanvasElement): {
+  right: number;
+  bottom: number;
+} {
+  const sheet = canvas.closest("[data-mindwalk-root]")?.querySelector("[data-mindwalk-sheet]");
+  if (!sheet) return { right: 0, bottom: 0 };
+  const view = canvas.getBoundingClientRect();
+  const box = sheet.getBoundingClientRect();
+  if (box.width === 0 || box.height === 0) return { right: 0, bottom: 0 };
+  // only the edge it actually hugs counts; a card floating in the middle would
+  // reserve nothing, which is correct — panning cannot help there anyway
+  const right = Math.max(0, view.right - box.left);
+  const bottom = Math.max(0, view.bottom - box.top);
+  return right < bottom ? { right, bottom: 0 } : { right: 0, bottom };
+}
+
+/** Undo a selection pan once the inspector that caused it has closed. */
+export function restoreCamera(
+  camera: THREE.PerspectiveCamera,
+  controls: { target: THREE.Vector3; update: () => void },
+  saved: { current: { position: THREE.Vector3; target: THREE.Vector3 } | null },
+) {
+  const previous = saved.current;
+  if (!previous) return;
+  saved.current = null;
+  camera.position.copy(previous.position);
+  controls.target.copy(previous.target);
+  controls.update();
+}
+
 export function ensureVisible(
   camera: THREE.PerspectiveCamera,
   controls: { target: THREE.Vector3; update: () => void },
@@ -57,6 +98,7 @@ export function ensureVisible(
   viewW: number,
   viewH: number,
   reservedRight: number,
+  reservedBottom: number,
 ) {
   if (viewW === 0 || viewH === 0) return;
   const forward = camera.getWorldDirection(new THREE.Vector3());
@@ -68,7 +110,7 @@ export function ensureVisible(
   const safeL = 48;
   const safeR = Math.max(safeL + 60, viewW - reservedRight - 48);
   const safeT = 120;
-  const safeB = viewH - 100;
+  const safeB = viewH - Math.max(100, reservedBottom + 24);
   const targetX = Math.min(Math.max(sx, safeL), safeR);
   const targetY = Math.min(Math.max(sy, safeT), safeB);
   if (targetX === sx && targetY === sy) return;

@@ -219,6 +219,7 @@ export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) 
     <TooltipProvider delay={0} closeDelay={0}>
       <div
         ref={surfaceRef}
+        data-mindwalk-root=""
         className="@container relative flex h-full flex-col overflow-hidden bg-background"
         style={cssVariables(palette, scenePalette)}
       >

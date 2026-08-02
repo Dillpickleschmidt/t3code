@@ -8,6 +8,8 @@ import { DirLabelSet } from "./dirLabels";
 import {
   disposeGroup,
   ensureVisible,
+  inspectorInsets,
+  restoreCamera,
   fitDistance,
   prefersReducedMotion,
   SceneTip,
@@ -51,20 +53,6 @@ function sceneColors(palette: ScenePalette): SceneColors {
 const TILE_H = 0.14;
 const LABEL_Y = 2.4;
 // the inspector docks on the right; selection pans the camera clear of it
-const INSPECTOR_RESERVED_PX = 348;
-/**
- * The dock re-lays itself out below this width — mindwalk's own 900px rule,
- * re-keyed to the container because this is a resizable panel. Above it the
- * inspector is a column on the right; below it the dock becomes a bottom
- * sheet, so reserving width on the right dodges a panel that is not there and
- * pans the whole stage hard left on every selection.
- *
- * Nothing is reserved for the bottom sheet: it is `h-auto`, usually a fraction
- * of its `max-h`, and reserving the worst case just trades a sideways lurch
- * for an upward one. The generic safe margins already keep a selection off the
- * very edge, which is all this needs to do.
- */
-const DOCK_SHEET_BREAKPOINT_PX = 900;
 
 function attentionHeight(touch: Touch, visits: number): number {
   const base = touch === "edit" ? 7.2 : touch === "read" ? 4.2 : 1.6;
@@ -162,6 +150,19 @@ export function CityScene({
   const fitPendingRef = useRef<(() => boolean) | null>(null);
   /** the live fit, so the resize handler in the other effect can re-run it */
   const fitViewRef = useRef<(() => boolean) | null>(null);
+  /**
+   * Where the camera was before a selection panned it clear of the inspector.
+   *
+   * mindwalk pans and never restores, which is fine on its stage: the reserve
+   * is a modest slice of a wide page, so the shift is small and the inspector
+   * is usually open anyway. Here the inspector can cover much of a narrow
+   * panel, so the pan is large and leaving the stage shoved aside after it
+   * closes reads as a bug. Cleared the moment the user takes the camera —
+   * restoring over their own framing would be worse than not restoring.
+   */
+  const preSelectCameraRef = useRef<{ position: THREE.Vector3; target: THREE.Vector3 } | null>(
+    null,
+  );
 
   const bounds = useMemo(() => {
     if (!city || city.files.length === 0) return { cx: 0, cz: 0, size: 120, halfW: 60, halfD: 60 };
@@ -235,6 +236,7 @@ export function CityScene({
     let userTookCamera = false;
     controls.addEventListener("start", () => {
       userTookCamera = true;
+      preSelectCameraRef.current = null;
       stopDrift();
       tip.hide();
     });
@@ -674,12 +676,17 @@ export function CityScene({
 
   // the inspector opens over the right edge; pan the selected tile clear of it
   useEffect(() => {
-    if (!city || !selectedPath) return;
-    const file = city.files.find((f) => f.path === selectedPath);
     const camera = cameraRef.current;
     const controls = controlsRef.current;
     const canvas = rendererRef.current?.domElement;
-    if (!file || !camera || !controls || !canvas) return;
+    if (!camera || !controls || !canvas) return;
+    if (!city || !selectedPath) return restoreCamera(camera, controls, preSelectCameraRef);
+    const file = city.files.find((f) => f.path === selectedPath);
+    if (!file) return;
+    preSelectCameraRef.current ??= {
+      position: camera.position.clone(),
+      target: controls.target.clone(),
+    };
     const top = heightsRef.current.get(file.id) ?? TILE_H;
     const world = centerFor(file, bounds);
     world.y = top;
@@ -689,7 +696,8 @@ export function CityScene({
       world,
       canvas.clientWidth,
       canvas.clientHeight,
-      canvas.clientWidth >= DOCK_SHEET_BREAKPOINT_PX ? INSPECTOR_RESERVED_PX : 0,
+      inspectorInsets(canvas).right,
+      inspectorInsets(canvas).bottom,
     );
   }, [city, bounds, selectedPath]);
 
