@@ -38,7 +38,7 @@ When set to `yes`, PRs run through the same labels and states as issues, using t
 
 GitHub shares one number space across issues and PRs, so a bare `#42` may be either — resolve with `gh pr view 42` and fall back to `gh issue view 42`.
 
-Note that PRs *contributing back to T3 Code* target `pingdotgg/t3code` and are governed by the "Pull requests" section of `AGENTS.md` — including its rule that you never open one unless the developer explicitly asks.
+Note that PRs _contributing back to T3 Code_ target `pingdotgg/t3code` and are governed by the "Pull requests" section of `AGENTS.md` — including its rule that you never open one unless the developer explicitly asks.
 
 ## When a skill says "publish to the issue tracker"
 

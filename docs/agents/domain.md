@@ -19,7 +19,7 @@ These files complement, and do not replace, what's already here:
 
 - **`AGENTS.md` § "A small glossary"** — project-wide terms every agent must use (_environment_, _project_, _thread_, _turn_, _provider_, _client_). This is the top-level authority; a `CONTEXT.md` must not contradict it.
 - **`docs/internals/glossary.md`** — the existing prose glossary with file links.
-- **`docs/`** splits by audience (`user/`, `internals/`, `operations/`, `architecture/`) per `AGENTS.md` § "Hit every surface". Domain docs are a separate axis: `CONTEXT.md` is scoped by *context*, not by audience.
+- **`docs/`** splits by audience (`user/`, `internals/`, `operations/`, `architecture/`) per `AGENTS.md` § "Hit every surface". Domain docs are a separate axis: `CONTEXT.md` is scoped by _context_, not by audience.
 
 ## File structure
 

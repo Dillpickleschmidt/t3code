@@ -120,9 +120,9 @@ assert.deepEqual(toolInputUpdated.payload.data, {
 
 **UNVERIFIED — `Read`/`Edit`/`Write` input key name.** `node_modules` is not installed in this
 worktree, so `@anthropic-ai/claude-agent-sdk`'s tool-input types could not be read. Claude Code's
-documented shape is snake_case `file_path`, and the one `Read` fixture in the repo
+documented shape is snake*case `file_path`, and the one `Read` fixture in the repo
 (`ClaudeAdapter.test.ts:2180`, `input: { path: "a.ts" }`) is hand-written and does **not** prove the
-real key. What _is_ verified and load-bearing:
+real key. What \_is* verified and load-bearing:
 
 ```
 $ grep -rn "file_path" apps/server/src packages/shared/src packages/contracts/src
