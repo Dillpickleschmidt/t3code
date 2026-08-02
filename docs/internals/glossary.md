@@ -157,11 +157,13 @@ A citymap building for a path that no longer exists on disk, kept so history tha
 
 #### Diff overlay
 
-Per-file, per-commit churn over a range of commits, plus the citymap it lands on — what the 3D Diff surface scrubs. Each step carries only its own change and the client sums steps 1.._i_ for the frame at position _i_; the last step is the uncommitted working tree. Unlike the trace it has no mindwalk counterpart: mindwalk visualises what an agent did, this visualises what a range of commits changed. Built by [DiffOverlay.ts][27], typed in [the contracts][1], and served at `GET /api/mindwalk/diff?cwd=` — keyed by working directory rather than by thread, because it is a view of a repository.
+Per-file, per-commit churn over a range of commits, plus the citymap it lands on — what the 3D Diff surface scrubs. Each step carries only its own change and is shown on its own: scrubbing walks the branch commit by commit rather than watching a total accumulate, which is how every other diff view in T3 reads, and how an ordinary git client reads. The last step is the uncommitted working tree. Unlike the trace it has no mindwalk counterpart: mindwalk visualises what an agent did, this visualises what a range of commits changed. Built by [DiffOverlay.ts][27], typed in [the contracts][1], and served at `GET /api/mindwalk/diff?cwd=` — keyed by working directory rather than by thread, because it is a view of a repository.
 
 #### Churn
 
-Additions plus deletions, deliberately not the net diff: a line added and later removed counts twice. It is what sizes a diff column, because the surface is asking "how much work landed here", not "what does the patch say". A file touched in more than one commit therefore reads higher than `git diff` reports for the same range.
+Additions plus deletions, deliberately not the net diff: a file that swaps ten lines for ten others has churned twenty, not zero. It is what sizes a diff column, because the surface is asking "how much work landed here", not "what does the patch say".
+
+Churn maps to height through a log curve with fixed anchors — `DIFF_HEIGHT_GAIN` and `DIFF_HEIGHT_KNEE` in [columns.ts][28] — rather than a scale taken from whatever is on screen. Absolute, so a file is the same height wherever it appears; log, because churn is heavily skewed and a linear scale leaves most of a repository on the floor.
 
 #### Column
 

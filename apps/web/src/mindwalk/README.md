@@ -115,6 +115,12 @@ Behavioral, and permanent:
   height instead of recomputing the attention curve. This is the one place a
   `git subtree pull` of mindwalk will conflict on future height tuning, and it
   is worth it.
+- **The camera frames columns, not just the ground.** Upstream fits the four
+  corners of the plain at `y = 0`, which is safe while columns are a small
+  fraction of the map's 120-unit width — mindwalk's attention heights top out
+  around 12. 3D Diff's reach past 30, so a surface can pass `tallestColumn`
+  and have the fit account for it. Omitted, the behaviour is upstream's
+  exactly, which is what the Watch Agent surface still does.
 - **`scene/frameLoop.ts` is ours, not mindwalk's.** Both scenes drive it
   instead of mindwalk's unconditional `requestAnimationFrame` loop, so a
   visible but idle scene issues zero draw calls. AGENTS.md's "no continuously
