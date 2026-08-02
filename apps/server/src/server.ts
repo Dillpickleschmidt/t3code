@@ -108,6 +108,7 @@ import {
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import * as CitymapBuilder from "./citymap/CitymapBuilder.ts";
 import { citymapHttpApiLayer } from "./citymap/http.ts";
+import * as DiffOverlay from "./mindwalk/DiffOverlay.ts";
 import * as MindwalkSnapshot from "./mindwalk/MindwalkSnapshot.ts";
 import { mindwalkHttpApiLayer } from "./mindwalk/http.ts";
 import * as NetService from "@t3tools/shared/Net";
@@ -353,6 +354,9 @@ const RuntimeCoreDependenciesLive = Layer.mergeAll(
   // query, and two projection repositories, so it sits at the top of the
   // dependency chain rather than inside any one of those groups.
   MindwalkSnapshot.layer,
+  // Same shape as the snapshot service above, reaching across the citymap
+  // builder and the review service instead.
+  DiffOverlay.layer,
 ).pipe(
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),

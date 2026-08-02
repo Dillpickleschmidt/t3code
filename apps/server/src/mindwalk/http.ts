@@ -9,6 +9,7 @@ import {
   failEnvironmentNotFound,
   requireEnvironmentScope,
 } from "../auth/http.ts";
+import * as DiffOverlay from "./DiffOverlay.ts";
 import * as MindwalkSnapshot from "./MindwalkSnapshot.ts";
 
 export const mindwalkHttpApiLayer = HttpApiBuilder.group(
@@ -16,21 +17,36 @@ export const mindwalkHttpApiLayer = HttpApiBuilder.group(
   "mindwalk",
   Effect.fnUntraced(function* (handlers) {
     const snapshots = yield* MindwalkSnapshot.MindwalkSnapshotService;
+    const diffOverlays = yield* DiffOverlay.DiffOverlayService;
 
-    return handlers.handle(
-      "threadSnapshot",
-      Effect.fn("environment.mindwalk.threadSnapshot")(function* (args) {
-        yield* annotateEnvironmentRequest(args.endpoint.name);
-        yield* requireEnvironmentScope(AuthOrchestrationReadScope);
+    return handlers
+      .handle(
+        "threadSnapshot",
+        Effect.fn("environment.mindwalk.threadSnapshot")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* requireEnvironmentScope(AuthOrchestrationReadScope);
 
-        const snapshot = yield* snapshots
-          .getSnapshot(args.params.threadId, args.query.lens)
-          .pipe(Effect.catch((cause) => failEnvironmentInternal("trace_projection_failed", cause)));
-        if (Option.isNone(snapshot)) {
-          return yield* failEnvironmentNotFound("thread_not_found");
-        }
-        return snapshot.value;
-      }),
-    );
+          const snapshot = yield* snapshots
+            .getSnapshot(args.params.threadId, args.query.lens)
+            .pipe(
+              Effect.catch((cause) => failEnvironmentInternal("trace_projection_failed", cause)),
+            );
+          if (Option.isNone(snapshot)) {
+            return yield* failEnvironmentNotFound("thread_not_found");
+          }
+          return snapshot.value;
+        }),
+      )
+      .handle(
+        "diffOverlay",
+        Effect.fn("environment.mindwalk.diffOverlay")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* requireEnvironmentScope(AuthOrchestrationReadScope);
+
+          return yield* diffOverlays
+            .getOverlay(args.query.cwd)
+            .pipe(Effect.catch((cause) => failEnvironmentInternal("diff_overlay_failed", cause)));
+        }),
+      );
   }),
 );
