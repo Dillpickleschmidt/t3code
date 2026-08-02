@@ -236,7 +236,11 @@ function rangeLabel(overlay: DiffOverlay): string {
   }
 }
 
+// Both separators, as `filePathDisplay.ts` does. The repo-relative paths
+// elsewhere in this surface are git's, and always use `/`; this one is an
+// absolute filesystem path from the server, so on Windows the whole of
+// `C:\Users\dev\t3code` would otherwise become the heading.
 function basename(path: string): string {
-  const clean = path.replace(/\/+$/, "");
-  return clean.slice(clean.lastIndexOf("/") + 1);
+  const clean = path.replace(/[\\/]+$/, "");
+  return clean.slice(Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\")) + 1);
 }
