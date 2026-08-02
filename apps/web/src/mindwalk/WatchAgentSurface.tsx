@@ -9,6 +9,7 @@ import { PrimaryEnvironmentHttpClient } from "../environments/primary/httpClient
 import { runPrimaryHttp } from "../lib/runtime";
 import { cssVariables, paletteFor, resolveScenePalette } from "./palette";
 import { PlaybackEngine } from "./playback/reducer";
+import { attentionColumns, sizeColumns } from "./scene/columns";
 import { CityScene } from "./scene/CityScene";
 import { TreeScene } from "./scene/TreeScene";
 import type { ScenePalette } from "./palette";
@@ -115,6 +116,16 @@ export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) 
   // scenes re-read only when this identity changes.
   const playback = useMemo(() => engine.snapshotAt(seq), [engine, seq]);
 
+  // A thread whose trace recorded nothing has no attention to raise terrain
+  // by, and a flat plain says less about the repository than its own shape
+  // does — which is what the view note has always promised in that case.
+  const columns = useMemo(() => {
+    if (!city) return [];
+    return total === 0
+      ? sizeColumns(city, scenePalette)
+      : attentionColumns(city, playback, scenePalette);
+  }, [city, total, playback, scenePalette]);
+
   // live tallies for the HUD spectrum; touchByPath mirrors the backend stats scope
   const touchCounts = useMemo(() => {
     let edited = 0;
@@ -150,10 +161,10 @@ export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) 
 
   const viewNote =
     view === "tree"
-      ? trace
+      ? total > 0
         ? "glow ∝ revisits"
         : "static map"
-      : trace
+      : total > 0
         ? "height ∝ depth × revisits"
         : "height ∝ lines";
 
@@ -236,7 +247,7 @@ export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) 
               {view === "tree" ? (
                 <TreeScene city={city} {...sceneProps} />
               ) : (
-                <CityScene city={city} {...sceneProps} />
+                <CityScene city={city} columns={columns} {...sceneProps} />
               )}
               <Hud
                 {...(trace && { trace })}

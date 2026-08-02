@@ -4,6 +4,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { touchWord, type CityFile, type CityMap, type Touch } from "../types";
 import type { FilePlayback } from "../playback/reducer";
 import type { ScenePalette } from "../palette";
+import { MAX_COLUMN_SEGMENTS, type Column } from "./columns";
 import { DirLabelSet } from "./dirLabels";
 import {
   disposeGroup,
@@ -21,13 +22,23 @@ import { TrailRenderer } from "./trail";
 
 interface CitySceneProps {
   city?: CityMap;
+  /**
+   * How tall each file's column stands and in what colours — the whole of what
+   * separates one drive mode from another. Built by the surface (see
+   * `./columns`), because the policy is a pure function of its own data and
+   * has no business being reachable only by mounting WebGL.
+   */
+  columns: readonly Column[];
+  /** The walker: the trail, the firefly at its head, and the hover readout's
+   * default wording. A surface with no walk (3D Diff) passes an empty one,
+   * which hides the firefly and clears the trail without any gating here. */
   playback: FilePlayback;
   selectedPath?: string;
   onSelect: (path?: string) => void;
   onCanvasReady?: (canvas: HTMLCanvasElement | null) => void;
-  // static map mode: with no session to drive attention height, raise terrain
-  // columns by file size (lines of code) instead of leaving the plain flat
-  locHeights?: boolean;
+  /** Second line of the hover readout. Defaults to the walk's own vocabulary
+   * ("read · 3 visits"), which is a lie on a surface that isn't a walk. */
+  hoverMeta?: (file: CityFile) => string;
   // the scrubber is playing: the one state that earns a continuous frame loop
   playing?: boolean;
   /** Colours the stage renders in. Resolved by the surface, not derived
@@ -54,64 +65,31 @@ const TILE_H = 0.14;
 const LABEL_Y = 2.4;
 // the inspector docks on the right; selection pans the camera clear of it
 
-function attentionHeight(touch: Touch, visits: number): number {
-  const base = touch === "edit" ? 7.2 : touch === "read" ? 4.2 : 1.6;
-  return base * (1 + 0.35 * Math.log2(Math.max(visits, 1)));
-}
-
-// static map height: normalized lines of code, log-scaled so a few huge files
-// don't flatten everything else. maxLog is log2(largest file's lines).
-const LOC_MIN_H = 0.3;
-const LOC_MAX_H = 16;
-// gamma > 1 exaggerates the top end: small files stay low, big files spike, so
-// the skyline reads as a city (towers vs shacks) instead of a uniform plateau
-const LOC_HEIGHT_GAMMA = 2.2;
-// normalized 0..1 position of a file by lines of code (log-scaled)
-function locFraction(lines: number, maxLog: number): number {
-  if (maxLog <= 0) return 0;
-  return Math.min(1, Math.log2(Math.max(lines, 1)) / maxLog);
-}
-function locHeight(t: number): number {
-  return LOC_MIN_H + Math.pow(t, LOC_HEIGHT_GAMMA) * (LOC_MAX_H - LOC_MIN_H);
-}
-
-// LOC tier ramp: small files stay grey, then warm up through orange and purple
-// to red for the largest files. Stops are interpolated so the terrain reads as
-// a continuous gradient rather than hard bands. Positions are fixed; the four
-// colors come from the palette (grey stop always matches `unvisited`).
-const LOC_RAMP_STOPS = [0.0, 0.35, 0.7, 1.0] as const;
-type LocRamp = { at: number; color: THREE.Color }[];
-
-function locRampFor(palette: ScenePalette): LocRamp {
-  return LOC_RAMP_STOPS.map((at, i) => ({ at, color: new THREE.Color(palette.city.locRamp[i]!) }));
-}
-
-function locColor(t: number, ramp: LocRamp): THREE.Color {
-  for (let i = 1; i < ramp.length; i++) {
-    if (t <= ramp[i]!.at) {
-      const lo = ramp[i - 1]!;
-      const hi = ramp[i]!;
-      const span = hi.at - lo.at;
-      const k = span > 0 ? (t - lo.at) / span : 0;
-      return lo.color.clone().lerp(hi.color, k);
-    }
-  }
-  return ramp[ramp.length - 1]!.color.clone();
-}
-
+/**
+ * One drawn slab: a segment of one file's column.
+ *
+ * `key` is the identity the growth animation keys its in-flight height by. It
+ * has to be per *segment*, not per file — two segments on one file would
+ * otherwise fight over a single animated value, which jitters rather than
+ * errors and is the kind of defect that survives a screenshot.
+ */
 interface TerrainSlot {
+  key: number;
   fileId: number;
   target: number;
   color: THREE.Color;
 }
 
+const slotKey = (fileId: number, segment: number) => fileId * MAX_COLUMN_SEGMENTS + segment;
+
 export function CityScene({
   city,
+  columns,
   playback,
   selectedPath,
   onSelect,
   onCanvasReady,
-  locHeights,
+  hoverMeta,
   playing = false,
   palette,
 }: CitySceneProps) {
@@ -119,13 +97,18 @@ export function CityScene({
   // place: it happens once in a blue moon, and the alternative is a second
   // code path that has to stay in step with scene construction forever.
   const colors = useMemo(() => sceneColors(palette), [palette]);
-  const locRamp = useMemo(() => locRampFor(palette), [palette]);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const tileMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const terrainMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const filesRef = useRef<CityFile[]>([]);
   const slotsRef = useRef<TerrainSlot[]>([]);
+  /** in-flight segment heights, by slot key — the growth animation's state,
+   * which outlives any one slot table so a column that just went dark can
+   * shrink back into the plain instead of vanishing */
   const heightsRef = useRef<Map<number, number>>(new Map());
+  /** each file's finished column height, for the things that ride on top of a
+   * column rather than draw it: the trail, the firefly, the selection pan */
+  const columnTopRef = useRef<Map<number, number>>(new Map());
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
@@ -143,6 +126,8 @@ export function CityScene({
   // handlers live in the mount effect; they read playback through this ref
   const playbackRef = useRef(playback);
   playbackRef.current = playback;
+  const hoverMetaRef = useRef(hoverMeta);
+  hoverMetaRef.current = hoverMeta;
   const playingRef = useRef(playing);
   playingRef.current = playing;
   // camera fit deferred while the viewport reports no size (hidden pane,
@@ -299,12 +284,7 @@ export function CityScene({
           tip.hide();
           return;
         }
-        const snapshot = playbackRef.current;
-        const touch = snapshot.touchByPath.get(file.path);
-        const visits = snapshot.visitsByFile.get(file.id) ?? 0;
-        const meta = touch
-          ? `${touchWord(touch)} · ${visits} visit${visits === 1 ? "" : "s"}`
-          : touchWord(undefined);
+        const meta = hoverMetaRef.current?.(file) ?? walkMeta(file, playbackRef.current);
         tip.show(file.path, file.ghost ? `${meta} · ghost` : meta, event.clientX, event.clientY);
       });
     };
@@ -353,40 +333,51 @@ export function CityScene({
       );
       const labelsEasing = labelSetRef.current?.ease(reducedRef.current) ?? false;
 
-      // grow / shrink terrain columns toward their attention targets
+      // grow / shrink terrain segments toward their targets
       const terrain = terrainMeshRef.current;
       const slots = slotsRef.current;
       const heights = heightsRef.current;
       let terrainMoving = false;
       if (terrain && slots.length > 0) {
         let moving = false;
+        // segments of one file arrive together and in order, so a running sum
+        // stacks them: each slab sits on the *current* height of the ones
+        // below it, which keeps a growing stack in one piece
+        let stackFileId = -1;
+        let stackBase = 0;
         for (let i = 0; i < slots.length; i++) {
           const slot = slots[i]!;
+          if (slot.fileId !== stackFileId) {
+            stackFileId = slot.fileId;
+            stackBase = 0;
+          }
           const file = filesRef.current[slot.fileId];
           if (!file) continue;
-          let cur = heights.get(slot.fileId) ?? 0;
+          let cur = heights.get(slot.key) ?? 0;
           const diff = slot.target - cur;
           if (Math.abs(diff) > 0.015) {
             cur = reducedRef.current ? slot.target : cur + diff * 0.13;
-            heights.set(slot.fileId, cur);
+            heights.set(slot.key, cur);
             moving = true;
           } else if (cur !== slot.target) {
-            heights.set(slot.fileId, slot.target);
+            heights.set(slot.key, slot.target);
             cur = slot.target;
             moving = true;
           }
+          const drawn = Math.max(cur, 0.02);
           const sx = Math.max(file.rect.w, 0.45) + 0.04;
           const sz = Math.max(file.rect.d, 0.45) + 0.04;
           matrix.compose(
             new THREE.Vector3(
               file.rect.x + file.rect.w / 2 - boundsRef.current.cx,
-              Math.max(cur, 0.02) / 2 + TILE_H,
+              stackBase + drawn / 2 + TILE_H,
               file.rect.z + file.rect.d / 2 - boundsRef.current.cz,
             ),
             quaternion,
-            new THREE.Vector3(sx, Math.max(cur, 0.02), sz),
+            new THREE.Vector3(sx, drawn, sz),
           );
           terrain.setMatrixAt(i, matrix);
+          stackBase += cur;
         }
         if (moving || terrainDirtyRef.current) terrain.instanceMatrix.needsUpdate = true;
         terrainDirtyRef.current = false;
@@ -519,14 +510,17 @@ export function CityScene({
     tileMeshRef.current = tiles;
     group.add(tiles);
 
-    // attention terrain: unlit columns that grow out of the plain
+    // terrain: unlit columns that grow out of the plain, one instance per
+    // stacked segment rather than per file — which is why diff stacking needed
+    // no second mesh
+    const terrainCapacity = city.files.length * MAX_COLUMN_SEGMENTS;
     const terrain = new THREE.InstancedMesh(
-      attentionColumnGeometry(palette.columnShade),
+      columnGeometry(palette.columnShade),
       new THREE.MeshBasicMaterial({ toneMapped: false, vertexColors: true }),
-      city.files.length,
+      terrainCapacity,
     );
     terrain.instanceColor = new THREE.InstancedBufferAttribute(
-      new Float32Array(city.files.length * 3),
+      new Float32Array(terrainCapacity * 3),
       3,
     );
     terrain.count = 0;
@@ -618,63 +612,69 @@ export function CityScene({
     };
   }, [city, bounds, palette, colors]);
 
-  // playback → terrain targets and colors
+  // columns → terrain targets and colors
   useEffect(() => {
     const terrain = terrainMeshRef.current;
     const tiles = tileMeshRef.current;
     if (!terrain || !tiles || !city) return;
 
+    const selectedId = city.files.find((file) => file.path === selectedPath)?.id;
+    for (const file of city.files) {
+      tiles.setColorAt(file.id, file.id === selectedId ? colors.selected : baseColor(file, colors));
+    }
+
     const heights = heightsRef.current;
+    const tops = new Map<number, number>();
     const slots: TerrainSlot[] = [];
     const present = new Set<number>();
-    // static map mode: no session drives attention, so raise every column by
-    // its lines of code instead of leaving the terrain flat
-    const maxLog = locHeights
-      ? Math.log2(
-          Math.max(
-            1,
-            city.files.reduce((m, f) => Math.max(m, f.lines), 1),
-          ),
-        )
-      : 0;
-    for (const file of city.files) {
-      const touch = playback.touchByFile.get(file.id);
-      const selected = file.path === selectedPath;
-      tiles.setColorAt(file.id, selected ? colors.selected : baseColor(file, colors));
-      if (touch) {
-        const visits = playback.visitsByFile.get(file.id) ?? 1;
-        let color = colors[touch];
-        if (file.ghost) color = color.clone().lerp(colors.ghost, 0.45);
-        if (selected) color = colors.selected;
-        slots.push({ fileId: file.id, target: attentionHeight(touch, visits), color });
-        present.add(file.id);
-      } else if (locHeights) {
-        const t = locFraction(file.lines, maxLog);
-        let color = locColor(t, locRamp);
-        if (file.ghost) color = color.lerp(colors.ghost, 0.45);
-        if (selected) color = colors.selected;
-        slots.push({ fileId: file.id, target: locHeight(t), color });
-        present.add(file.id);
+    for (const column of columns) {
+      let top = 0;
+      // the capacity the terrain mesh was built with; a mode that stacks
+      // deeper raises MAX_COLUMN_SEGMENTS rather than silently losing a slab
+      const segments = column.segments.slice(0, MAX_COLUMN_SEGMENTS);
+      segments.forEach((segment, index) => {
+        const key = slotKey(column.fileId, index);
+        slots.push({
+          key,
+          fileId: column.fileId,
+          target: segment.height,
+          // selection outranks whatever the mode painted, on every slab of the
+          // stack, so a selected file reads as one solid marker
+          color: column.fileId === selectedId ? colors.selected : segment.color,
+        });
+        present.add(key);
+        top += segment.height;
+      });
+      tops.set(column.fileId, top);
+    }
+    // let segments that just went dark shrink back into the plain
+    for (const [key, cur] of heights) {
+      if (present.has(key)) continue;
+      if (cur > 0.04) {
+        slots.push({
+          key,
+          fileId: Math.floor(key / MAX_COLUMN_SEGMENTS),
+          target: 0,
+          color: colors.unvisited,
+        });
+      } else {
+        heights.delete(key);
       }
     }
-    // let columns that just went dark shrink back into the plain
-    for (const [fileId, cur] of heights) {
-      if (cur > 0.04 && !present.has(fileId)) {
-        slots.push({ fileId, target: 0, color: colors.unvisited });
-      } else if (cur <= 0.04 && !present.has(fileId)) {
-        heights.delete(fileId);
-      }
-    }
+    // a shrinking stack's slabs must still stack, and the frame loop reads the
+    // run of slots per file rather than their keys to do it
+    slots.sort((a, b) => a.key - b.key);
 
     slots.forEach((slot, i) => terrain.setColorAt(i, slot.color));
     terrain.count = slots.length;
     if (terrain.instanceColor) terrain.instanceColor.needsUpdate = true;
     if (tiles.instanceColor) tiles.instanceColor.needsUpdate = true;
     slotsRef.current = slots;
-    // slot index → fileId may have shifted even where no column is lerping
+    columnTopRef.current = tops;
+    // slot index → segment may have shifted even where nothing is lerping
     terrainDirtyRef.current = true;
     loopRef.current?.invalidate();
-  }, [city, playback, selectedPath, locHeights, colors, locRamp]);
+  }, [city, columns, selectedPath, colors]);
 
   // the inspector opens over the right edge; pan the selected tile clear of it
   useEffect(() => {
@@ -689,7 +689,7 @@ export function CityScene({
       position: camera.position.clone(),
       target: controls.target.clone(),
     };
-    const top = heightsRef.current.get(file.id) ?? TILE_H;
+    const top = columnTopRef.current.get(file.id) ?? TILE_H;
     const world = centerFor(file, bounds);
     world.y = top;
     ensureVisible(
@@ -714,11 +714,11 @@ export function CityScene({
       .map((target) => (target.fileId !== undefined ? city.files[target.fileId] : undefined))
       .filter((file): file is CityFile => Boolean(file));
 
-    const peakFor = (file: CityFile): number => {
-      const touch = playback.touchByFile.get(file.id);
-      const visits = playback.visitsByFile.get(file.id) ?? 1;
-      return touch ? attentionHeight(touch, visits) : TILE_H;
-    };
+    // the walker rides on whatever the terrain is showing rather than
+    // recomputing the attention curve, which is what lets the height policy
+    // live entirely in `./columns`
+    const peakFor = (file: CityFile): number =>
+      Math.max(columnTopRef.current.get(file.id) ?? 0, TILE_H);
 
     const firefly = fireflyRef.current;
     if (firefly) {
@@ -740,7 +740,7 @@ export function CityScene({
       }),
     );
     loopRef.current?.invalidate();
-  }, [city, playback, bounds, palette]);
+  }, [city, playback, columns, bounds, palette]);
 
   // starting or stopping the walk switches the loop between continuous and
   // demand-driven; either edge needs a frame to act on it
@@ -754,7 +754,7 @@ export function CityScene({
 // Columns must read as phosphorescence, not paint: glow pools at the crest and
 // falls off into the plain. Vertex shade multiplies the per-instance touch
 // color; the top face sits under the side rims so edges catch the most light.
-function attentionColumnGeometry(columnShade: readonly [number, number]): THREE.BoxGeometry {
+function columnGeometry(columnShade: readonly [number, number]): THREE.BoxGeometry {
   const [base, crest] = columnShade;
   const geo = new THREE.BoxGeometry(1, 1, 1);
   const pos = geo.getAttribute("position");
@@ -767,6 +767,14 @@ function attentionColumnGeometry(columnShade: readonly [number, number]): THREE.
   }
   geo.setAttribute("color", new THREE.BufferAttribute(shade, 3));
   return geo;
+}
+
+/** The hover readout's default second line: what the walk did to this file. */
+function walkMeta(file: CityFile, playback: FilePlayback): string {
+  const touch = playback.touchByPath.get(file.path);
+  if (!touch) return touchWord(undefined);
+  const visits = playback.visitsByFile.get(file.id) ?? 0;
+  return `${touchWord(touch)} · ${visits} visit${visits === 1 ? "" : "s"}`;
 }
 
 function baseColor(file: CityFile, colors: SceneColors): THREE.Color {
