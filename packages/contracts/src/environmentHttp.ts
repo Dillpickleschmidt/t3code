@@ -26,6 +26,7 @@ import {
 } from "./auth.ts";
 import { AuthSessionId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { Citymap } from "./citymap.ts";
+import { DiffOverlay } from "./diffOverlay.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import {
   ClientOrchestrationCommand,
@@ -88,6 +89,7 @@ export const EnvironmentInternalErrorReason = Schema.Literals([
   "orchestration_dispatch_failed",
   "citymap_build_failed",
   "trace_projection_failed",
+  "diff_overlay_failed",
   "internal_error",
 ]);
 export type EnvironmentInternalErrorReason = typeof EnvironmentInternalErrorReason.Type;
@@ -525,19 +527,42 @@ const EnvironmentMindwalkQuery = Schema.Struct({
 });
 
 /**
+ * The absolute working directory to diff. There is deliberately no base-ref
+ * parameter yet: the first cut of 3D Diff resolves its window the way the 2D
+ * panel's Automatic does, and growing a picker is a question the built surface
+ * answers better than this schema can.
+ */
+const EnvironmentDiffOverlayQuery = Schema.Struct({
+  cwd: Schema.String,
+});
+
+/**
  * The trace and the citymap ship together, and over HTTP for the same reason
  * the citymap does: the pair is hundreds of kilobytes gzipped, and the citymap
  * wants sending once rather than once per artifact.
  */
-export class EnvironmentMindwalkHttpApi extends HttpApiGroup.make("mindwalk").add(
-  HttpApiEndpoint.get("threadSnapshot", "/api/mindwalk/threads/:threadId", {
-    headers: OptionalBearerHeaders,
-    params: EnvironmentMindwalkParams,
-    query: EnvironmentMindwalkQuery,
-    success: MindwalkSnapshot,
-    error: EnvironmentOrchestrationThreadSnapshotErrors,
-  }).middleware(EnvironmentAuthenticatedAuth),
-) {}
+export class EnvironmentMindwalkHttpApi extends HttpApiGroup.make("mindwalk")
+  .add(
+    HttpApiEndpoint.get("threadSnapshot", "/api/mindwalk/threads/:threadId", {
+      headers: OptionalBearerHeaders,
+      params: EnvironmentMindwalkParams,
+      query: EnvironmentMindwalkQuery,
+      success: MindwalkSnapshot,
+      error: EnvironmentOrchestrationThreadSnapshotErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    // Keyed by working directory rather than by thread: 3D Diff is a view of a
+    // repository, the way the 2D Diff panel is, and both are reachable from a
+    // thread only because the right panel happens to be thread-scoped. The
+    // server bounds the cwd to the workspace before touching it.
+    HttpApiEndpoint.get("diffOverlay", "/api/mindwalk/diff", {
+      headers: OptionalBearerHeaders,
+      query: EnvironmentDiffOverlayQuery,
+      success: DiffOverlay,
+      error: EnvironmentOrchestrationThreadSnapshotErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
 
 export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   .add(

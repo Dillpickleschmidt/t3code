@@ -80,6 +80,7 @@ import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CitymapBuilder from "./citymap/CitymapBuilder.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as Keybindings from "./keybindings.ts";
+import * as DiffOverlay from "./mindwalk/DiffOverlay.ts";
 import * as MindwalkSnapshot from "./mindwalk/MindwalkSnapshot.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
@@ -352,6 +353,7 @@ const buildAppUnderTest = (options?: {
     checkpointDiffQuery?: Partial<CheckpointDiffQuery.CheckpointDiffQuery["Service"]>;
     citymapBuilder?: Partial<CitymapBuilder.CitymapBuilder["Service"]>;
     mindwalkSnapshotService?: Partial<MindwalkSnapshot.MindwalkSnapshotService["Service"]>;
+    diffOverlayService?: Partial<DiffOverlay.DiffOverlayService["Service"]>;
     browserTraceCollector?: Partial<BrowserTraceCollector.BrowserTraceCollector["Service"]>;
     serverLifecycleEvents?: Partial<ServerLifecycleEvents.ServerLifecycleEvents["Service"]>;
     serverRuntimeStartup?: Partial<ServerRuntimeStartup.ServerRuntimeStartup["Service"]>;
@@ -779,6 +781,23 @@ const buildAppUnderTest = (options?: {
           Layer.mock(MindwalkSnapshot.MindwalkSnapshotService)({
             getSnapshot: () => Effect.succeed(Option.none()),
             ...options?.layers?.mindwalkSnapshotService,
+          }),
+          Layer.mock(DiffOverlay.DiffOverlayService)({
+            getOverlay: (cwd) =>
+              Effect.succeed({
+                cwd,
+                generatedAt: "1970-01-01T00:00:00.000Z",
+                range: { kind: "working-tree", baseRef: null, headRef: null },
+                steps: [],
+                citymap: {
+                  version: 1,
+                  repo: { root: cwd, dirty: false, generatedAt: "1970-01-01T00:00:00.000Z" },
+                  files: [],
+                  dirs: [],
+                  layout: { algorithm: "squarified-treemap-v1", weight: "" },
+                },
+              }),
+            ...options?.layers?.diffOverlayService,
           }),
         ),
       ),
