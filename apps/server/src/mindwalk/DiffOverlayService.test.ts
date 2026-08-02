@@ -269,8 +269,7 @@ describe("DiffOverlayService", () => {
         return yield* service.getOverlay(outside).pipe(Effect.flip);
       }).pipe(Effect.provide(layerFor(workspace)));
 
-      assert.strictEqual(error._tag, "DiffOverlayError");
-      assert.strictEqual(error.operation, "outsideWorkspace");
+      assert.strictEqual(error._tag, "DiffOverlayOutsideWorkspaceError");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

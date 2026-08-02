@@ -54,12 +54,31 @@ const LOG_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 /** Untracked files diffed at once, matching `readUntrackedReviewDiffs`. */
 const UNTRACKED_CONCURRENCY = 4;
 
+/**
+ * The requested cwd is not inside the workspace. Its own class rather than an
+ * `operation` on the error below, because it is the one failure a caller
+ * branches on: the HTTP layer answers it `cwd_not_found` while everything else
+ * is an internal error. `WorkspacePathOutsideRootError` sits beside
+ * `WorkspaceFileSystemOperationError` for the same reason.
+ */
+export class DiffOverlayOutsideWorkspaceError extends Schema.TaggedErrorClass<DiffOverlayOutsideWorkspaceError>()(
+  "DiffOverlayOutsideWorkspaceError",
+  {
+    cwd: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Diff overlay cwd must stay within the configured workspace root: ${this.cwd}`;
+  }
+}
+
+/** A git call the overlay needed failed or came back truncated. Diagnostic. */
 export class DiffOverlayError extends Schema.TaggedErrorClass<DiffOverlayError>()(
   "DiffOverlayError",
   {
     cwd: Schema.String,
     operation: Schema.Literals([
-      "outsideWorkspace",
       "log",
       "logTruncated",
       "workingTree",
@@ -82,7 +101,9 @@ export class DiffOverlayService extends Context.Service<
      * Build the overlay for a working directory. The cwd is bounded to the
      * configured workspace by `ReviewService` before any git runs against it.
      */
-    readonly getOverlay: (cwd: string) => Effect.Effect<DiffOverlay, DiffOverlayError>;
+    readonly getOverlay: (
+      cwd: string,
+    ) => Effect.Effect<DiffOverlay, DiffOverlayError | DiffOverlayOutsideWorkspaceError>;
   }
 >()("t3/mindwalk/DiffOverlay/DiffOverlayService") {}
 
@@ -105,11 +126,7 @@ export const make = Effect.gen(function* () {
     // take the boundary with it.
     yield* review
       .assertWorkspaceBoundCwd(cwd)
-      .pipe(
-        Effect.mapError(
-          (cause) => new DiffOverlayError({ cwd, operation: "outsideWorkspace", cause }),
-        ),
-      );
+      .pipe(Effect.mapError((cause) => new DiffOverlayOutsideWorkspaceError({ cwd, cause })));
 
     const generatedAt = DateTime.formatIso(yield* DateTime.now);
 
