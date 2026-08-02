@@ -23,6 +23,15 @@ export class ReviewService extends Context.Service<
     readonly getDiffPreview: (
       input: ReviewDiffPreviewInput,
     ) => Effect.Effect<ReviewDiffPreviewResult, ReviewDiffPreviewError>;
+    /**
+     * Fails unless `cwd` canonicalizes inside the workspace root or the
+     * worktrees dir. `getDiffPreview` already applies this to its own input;
+     * it is exposed because callers that take a cwd from the client need the
+     * same gate whether or not they happen to ask for a diff preview.
+     */
+    readonly assertWorkspaceBoundCwd: (
+      cwd: string,
+    ) => Effect.Effect<void, VcsRepositoryDetectionError>;
   }
 >()("t3/review/ReviewService") {}
 
@@ -108,6 +117,7 @@ export const make = Effect.gen(function* () {
 
   return ReviewService.of({
     getDiffPreview,
+    assertWorkspaceBoundCwd,
   });
 });
 
