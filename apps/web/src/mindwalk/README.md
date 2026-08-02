@@ -4,10 +4,17 @@
 `web/src` (MIT, © 2026 Ricko Yu — see `../../THIRD_PARTY_NOTICES.md`), vendored
 at `.repos/mindwalk` at the revision this copy was taken from.
 
-`WatchAgentSurface.tsx`, `palette.ts`, and `surface.css` are ours, written
-against T3 — the equivalent of mindwalk's `App.tsx`, `state/`, and `api/`,
-which are the parts of the port deliberately not copied. The verbatim rule
-below binds only the copies.
+`WatchAgentSurface.tsx`, `DiffSurface.tsx`, `palette.ts`, `scene/columns.ts`,
+`scene/frameLoop.ts`, `ui/CommitScrubber.tsx`, and `surface.css` are ours,
+written against T3 — the equivalent of mindwalk's `App.tsx`, `state/`, and
+`api/`, which are the parts of the port deliberately not copied. The verbatim
+rule below binds only the copies.
+
+Two surfaces share the stage. **3D Watch Agent** replays one thread's trace
+over its repository and is mindwalk's own idea; **3D Diff** steps a range of
+commits over the same citymap and has no upstream counterpart. They differ in
+one thing — how tall each file's column stands and in what colour — which is
+exactly what `scene/columns.ts` is.
 
 `ui/` is mindwalk's structure restyled onto T3: the components keep upstream's
 markup shape, prop contracts, derivations, and hint copy, but their 2,452 lines
@@ -97,6 +104,17 @@ stay in step with the first forever.
 
 Behavioral, and permanent:
 
+- **`CityScene` takes `columns`, not a mode flag.** Upstream branches inside
+  the scene on which prop is present — `playback` for attention, `locHeights`
+  for file size, scattered through `.repos/mindwalk/web/src/scene/CityScene.tsx`
+  — with an undocumented precedence rule between them. A third mode makes
+  that eight representable combinations for three valid states. Here the height
+  policy is lifted out to `scene/columns.ts` as one pure function per mode, and
+  the scene takes the result. Stacking then needs no second mesh, the height
+  maths is testable without mounting WebGL, and the walker reads a column's
+  height instead of recomputing the attention curve. This is the one place a
+  `git subtree pull` of mindwalk will conflict on future height tuning, and it
+  is worth it.
 - **`scene/frameLoop.ts` is ours, not mindwalk's.** Both scenes drive it
   instead of mindwalk's unconditional `requestAnimationFrame` loop, so a
   visible but idle scene issues zero draw calls. AGENTS.md's "no continuously

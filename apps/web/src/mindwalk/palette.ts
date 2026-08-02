@@ -85,6 +85,15 @@ export interface ScenePalette {
     readonly ghost: string;
     /** Static-map height ramp, small files → large. Four stops, interpolated. */
     readonly locRamp: readonly [string, string, string, string];
+    /**
+     * Stacked diff terrain: additions from the ground up, deletions capping
+     * them. New vocabulary — the attention palette has no green/red pair, and
+     * unlike the touch colours these are not mindwalk's to declare. They
+     * resolve from T3's own `--success` and `--destructive`, so a column agrees
+     * with every other place the app says "added" and "removed".
+     */
+    readonly diffAdded: string;
+    readonly diffRemoved: string;
     /** Directory floor plates, shallow → deep nesting. */
     readonly dirShadeNear: string;
     readonly dirShadeFar: string;
@@ -173,6 +182,9 @@ const DARK: MindwalkPalette = {
       unvisited: "#616161",
       ghost: "#464646",
       locRamp: ["#616161", "#e0894f", "#9a6bd8", "#e0524f"],
+      // fallbacks only; `--success` and `--destructive` at their dark values
+      diffAdded: "#00bc7d",
+      diffRemoved: "#fb2c36",
       dirShadeNear: "#171717",
       dirShadeFar: "#232323",
     },
@@ -237,6 +249,10 @@ const LIGHT: MindwalkPalette = {
       unvisited: "#a8a8a8",
       ghost: "#c9c9c9",
       locRamp: ["#a8a8a8", "#c26a1c", "#6a3fa6", "#b02623"],
+      // fallbacks only; darker than the dark theme's pair for the same reason
+      // every other light value is — ink on paper, not light on darkness
+      diffAdded: "#127a52",
+      diffRemoved: "#b02623",
       dirShadeNear: "#ededed",
       dirShadeFar: "#dedede",
     },
@@ -401,6 +417,10 @@ export function resolveScenePalette(host: HTMLElement, theme: MindwalkTheme): Sc
     const edgeLit = mix(STRUCTURE_MIX.treeEdgeLit);
     const dirShadeNear = mix(STRUCTURE_MIX.dirShadeNear);
     const dirShadeFar = mix(STRUCTURE_MIX.dirShadeFar);
+    // not on the neutral axis: these are the app's own added/removed tokens,
+    // read so a diff column is the same green and red as the 2D Diff panel
+    const diffAdded = read("var(--success)");
+    const diffRemoved = read("var(--destructive)");
     if (
       !sky ||
       !labelInk ||
@@ -413,7 +433,9 @@ export function resolveScenePalette(host: HTMLElement, theme: MindwalkTheme): Sc
       !edgeBase ||
       !edgeLit ||
       !dirShadeNear ||
-      !dirShadeFar
+      !dirShadeFar ||
+      !diffAdded ||
+      !diffRemoved
     ) {
       return fallback;
     }
@@ -432,6 +454,8 @@ export function resolveScenePalette(host: HTMLElement, theme: MindwalkTheme): Sc
         // the ramp's first stop is the grey that means "smallest file", and it
         // has always been the same grey as unvisited
         locRamp: [unvisited, ...fallback.city.locRamp.slice(1)] as [string, string, string, string],
+        diffAdded,
+        diffRemoved,
         dirShadeNear,
         dirShadeFar,
       },
@@ -461,6 +485,10 @@ export function cssVariables(
     // palette: they key structural greys, which move with T3's axis
     "--mw-touch-unvisited": scene.city.unvisited,
     "--mw-touch-ghost-border": scene.city.ghost,
+    // the scrubber's churn bars are a legend for the terrain behind them, so
+    // they read the *resolved* pair the GPU is drawing rather than the token
+    "--mw-diff-added": scene.city.diffAdded,
+    "--mw-diff-removed": scene.city.diffRemoved,
     "--mw-act-search": data.action.search,
     "--mw-act-read": data.action.read,
     "--mw-act-edit": data.action.edit,

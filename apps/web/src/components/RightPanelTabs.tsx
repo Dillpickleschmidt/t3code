@@ -6,6 +6,7 @@ import {
   FileDiff,
   Files,
   Globe2,
+  Layers,
   Plus,
   TerminalSquare,
   X,
@@ -54,10 +55,12 @@ interface RightPanelTabsProps {
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddWatch3d: () => void;
+  onAddDiff3d: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
   watch3dAvailable: boolean;
+  diff3dAvailable: boolean;
   children: ReactNode;
 }
 
@@ -66,6 +69,7 @@ const SURFACE_DISABLED_REASONS = {
   files: "Files are only available when a project is open.",
   diff: "Diff is only available for server threads in Git repositories.",
   watch3d: "3D Watch Agent is only available for server threads.",
+  diff3d: "3D Diff is only available for server threads in Git repositories.",
 } as const;
 
 type TabContextMenuAction = "copy-path" | "close" | "close-others" | "close-to-right" | "close-all";
@@ -105,9 +109,11 @@ function RightPanelEmptyState(props: {
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddWatch3d: () => void;
+  onAddDiff3d: () => void;
   diffAvailable: boolean;
   filesAvailable: boolean;
   watch3dAvailable: boolean;
+  diff3dAvailable: boolean;
 }) {
   const actions = [
     {
@@ -141,6 +147,14 @@ function RightPanelEmptyState(props: {
       available: props.watch3dAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.watch3d,
       onClick: props.onAddWatch3d,
+    },
+    {
+      label: "3D Diff",
+      description: "Step this branch's commits over your repository.",
+      icon: Layers,
+      available: props.diff3dAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.diff3d,
+      onClick: props.onAddDiff3d,
     },
   ] as const;
 
@@ -221,6 +235,8 @@ function surfaceTitle(
       return "Plan";
     case "watch3d":
       return "3D Watch Agent";
+    case "diff3d":
+      return "3D Diff";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -284,6 +300,8 @@ function SurfaceIcon({
       return <ClipboardList className="size-3.5 shrink-0" />;
     case "watch3d":
       return <Boxes className="size-3.5 shrink-0" />;
+    case "diff3d":
+      return <Layers className="size-3.5 shrink-0" />;
   }
 }
 
@@ -497,6 +515,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     <Boxes />
                     3D Watch Agent
                   </SurfaceMenuItem>
+                  <SurfaceMenuItem
+                    available={props.diff3dAvailable}
+                    disabledReason={SURFACE_DISABLED_REASONS.diff3d}
+                    onClick={props.onAddDiff3d}
+                  >
+                    <Layers />
+                    3D Diff
+                  </SurfaceMenuItem>
                 </MenuPopup>
               </Menu>
             ) : null}
@@ -511,9 +537,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
             onAddWatch3d={props.onAddWatch3d}
+            onAddDiff3d={props.onAddDiff3d}
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
             watch3dAvailable={props.watch3dAvailable}
+            diff3dAvailable={props.diff3dAvailable}
           />
         ) : (
           props.children
