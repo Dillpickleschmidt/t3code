@@ -15,6 +15,12 @@
  * A step's counts are *churn* rather than a net diff — ten lines swapped for
  * ten others is twenty, not zero — because the surface is asking "how much
  * work landed here", not "what does the patch say".
+ *
+ * The whole range as one frame is a *different question* and so a different
+ * field: `aggregate` is the net diff across the window, which is what the 2D
+ * Diff panel's "Branch changes" entry shows. Summing the steps would answer
+ * with churn instead and the two panels would disagree under the same name,
+ * which is the failure the scopes exist to prevent.
  */
 import * as Schema from "effect/Schema";
 
@@ -71,11 +77,34 @@ export const DiffOverlayRange = Schema.Struct({
 });
 export type DiffOverlayRange = typeof DiffOverlayRange.Type;
 
+/**
+ * The window as one net frame — `git diff --numstat <base>...HEAD` — rather
+ * than the churn of its steps summed.
+ *
+ * Three dots, because that is what the 2D panel's branch source runs
+ * (`GitVcsDriverCore.getReviewDiffPreview`), and rename detection left on for
+ * the same reason: this frame is read against that panel's numbers, so it has
+ * to ask git the identical question. That makes it deliberately asymmetric
+ * with `steps`, which run `--no-renames` so a rename reads as one building
+ * emptying and another filling — the right answer for a single commit on a
+ * city, and the wrong one for a total that has to match a number on screen
+ * somewhere else.
+ *
+ * Committed work only. Uncommitted changes are the working-tree scope's, the
+ * same split the 2D panel makes.
+ *
+ * Null when the window has no base to net against: a `working-tree` range has
+ * no commits at all, and a `recent-commits` range whose oldest step is the
+ * repository's root commit has nothing before it to diff from. The 2D panel
+ * shows an empty branch diff in both cases, so this degrades to parity with it
+ * rather than inventing a number.
+ */
 export const DiffOverlay = Schema.Struct({
   cwd: Schema.String,
   generatedAt: Schema.String,
   range: DiffOverlayRange,
   steps: Schema.Array(DiffOverlayStep),
+  aggregate: Schema.NullOr(Schema.Array(DiffOverlayFile)),
   citymap: Citymap,
 });
 export type DiffOverlay = typeof DiffOverlay.Type;

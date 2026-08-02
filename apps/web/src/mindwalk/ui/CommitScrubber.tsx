@@ -9,8 +9,17 @@ interface CommitScrubberProps {
   steps: readonly DiffOverlayStep[];
   /** How the window was resolved, for the caption's right-hand label. */
   rangeLabel: string;
-  currentStep: number;
-  onChange: (step: number) => void;
+  /**
+   * Which commit the stage is standing in, or `null` for the whole range at
+   * once — the net frame the Branch changes scope opens on.
+   *
+   * The scrubber is a drill-down of that scope rather than a scope of its own,
+   * so "no commit selected" is a real position rather than the absence of one:
+   * it is where you start, every bar is lit because every commit is in view,
+   * and stepping in and back out has to be reachable without leaving the scope.
+   */
+  currentStep: number | null;
+  onChange: (step: number | null) => void;
   /** playback state lives with the surface, which also drives the scene's
    * frame loop — a scene must know it is playing to book continuous frames */
   playing: boolean;
@@ -50,9 +59,11 @@ export function CommitScrubber({
 }: CommitScrubberProps) {
   const total = steps.length;
   const max = Math.max(0, total - 1);
-  const step = Math.min(currentStep, max);
-  const current = steps[step];
+  const step = currentStep === null ? null : Math.min(currentStep, max);
+  const current = step === null ? undefined : steps[step];
 
+  // The whole range sits *before* the first commit on the strip, so playing
+  // and stepping forward from it enter at commit one rather than skipping it.
   const seqRef = useRef(step);
   const maxRef = useRef(max);
   const playingRef = useRef(playing);
@@ -63,23 +74,33 @@ export function CommitScrubber({
   useEffect(() => {
     if (!playing || total === 0) return;
     const timer = window.setInterval(() => {
-      if (seqRef.current >= maxRef.current) {
+      const seq = seqRef.current;
+      if (seq !== null && seq >= maxRef.current) {
         onPlayingChange(false);
         return;
       }
-      onChange(seqRef.current + 1);
+      onChange(seq === null ? 0 : seq + 1);
     }, TICK_MS);
     return () => window.clearInterval(timer);
   }, [playing, total, onChange, onPlayingChange]);
 
   const togglePlay = useCallback(() => {
-    if (!playingRef.current && seqRef.current >= maxRef.current) onChange(0);
+    const seq = seqRef.current;
+    if (!playingRef.current && seq !== null && seq >= maxRef.current) onChange(0);
     onPlayingChange(!playingRef.current);
   }, [onChange, onPlayingChange]);
 
   const nudge = useCallback(
     (delta: number) => {
-      onChange(Math.min(maxRef.current, Math.max(0, seqRef.current + delta)));
+      const seq = seqRef.current;
+      // Stepping back off the first commit returns to the whole range rather
+      // than sticking at commit one: the way in needs a way out.
+      if (seq === null) {
+        if (delta > 0) onChange(0);
+        return;
+      }
+      const next = seq + delta;
+      onChange(next < 0 ? null : Math.min(maxRef.current, next));
     },
     [onChange],
   );
@@ -100,7 +121,7 @@ export function CommitScrubber({
   const peak = useMemo(() => bars.reduce((acc, bar) => Math.max(acc, bar.churn), 1), [bars]);
 
   const locked = total === 0;
-  const currentBar = bars[step];
+  const currentBar = step === null ? undefined : bars[step];
 
   return (
     <footer className="flex flex-none flex-col gap-1.5 border-border border-t bg-card px-5 py-2.5 @max-[900px]:px-3">
@@ -121,8 +142,10 @@ export function CommitScrubber({
                   // the step you are on, not the ground you have covered:
                   // each bar is its own commit, so filling up to the cursor
                   // would read as a total that is accumulating
+                  // …and on the whole range every bar is lit, because every
+                  // commit is in the frame behind it.
                   className={`flex min-w-0 flex-1 flex-col overflow-hidden rounded-t-[1px] ${
-                    index === step ? "opacity-100" : "opacity-30"
+                    step === null || index === step ? "opacity-100" : "opacity-30"
                   }`}
                   style={{ height: `${height}%` }}
                 >
@@ -135,7 +158,8 @@ export function CommitScrubber({
               );
             })}
           </div>
-          {total > 0 ? (
+          {/* no playhead on the whole range: there is no one commit to point at */}
+          {total > 0 && step !== null ? (
             <div
               className="pointer-events-none absolute top-2.5 bottom-0 w-[1.5px] -translate-x-1/2 bg-foreground after:absolute after:bottom-[-2px] after:left-1/2 after:size-[5px] after:-translate-x-1/2 after:rotate-45 after:bg-foreground after:content-['']"
               style={{ left: `${(step / Math.max(max, 1)) * 100}%` }}
@@ -147,11 +171,17 @@ export function CommitScrubber({
             type="range"
             min={0}
             max={max}
-            value={step}
+            value={step ?? 0}
             disabled={locked}
             onChange={(event) => onChange(Number(event.currentTarget.value))}
             aria-label="Diff position"
-            aria-valuetext={current ? `${stepWord(current)}: ${current.title}` : "empty"}
+            aria-valuetext={
+              current
+                ? `${stepWord(current)}: ${current.title}`
+                : total > 0
+                  ? "whole range"
+                  : "empty"
+            }
           />
         </div>
 
@@ -161,7 +191,7 @@ export function CommitScrubber({
             className="block text-foreground text-sm tabular-nums tracking-wide"
             style={{ minWidth: `${String(Math.max(total, 1)).length * 2 + 3}ch` }}
           >
-            {total > 0 ? `${step + 1} / ${total}` : "0 / 0"}
+            {total === 0 ? "0 / 0" : step === null ? `All ${total}` : `${step + 1} / ${total}`}
           </span>
           <span className="block text-xs text-muted-foreground/70 tabular-nums">
             {current ? day(current.committedAt, timestampFormat) : "—"}
@@ -185,9 +215,9 @@ export function CommitScrubber({
             <StepForward />
           </IconButton>
           <IconButton
-            onClick={() => onChange(0)}
-            disabled={locked}
-            label="Back to the first commit"
+            onClick={() => onChange(null)}
+            disabled={locked || step === null}
+            label="Back to the whole range"
           >
             <RotateCcw />
           </IconButton>
@@ -212,6 +242,14 @@ export function CommitScrubber({
                 {current.title}
               </span>
             </>
+          ) : total > 0 ? (
+            // The whole-range frame is a *net* diff, so its counts are the
+            // header's rather than a sum of the bars below — saying so here as
+            // well would invite reading them as the same number.
+            <span className="truncate text-muted-foreground">
+              The whole range, netted. Scrub to step into one of its {total} commit
+              {total === 1 ? "" : "s"}.
+            </span>
           ) : (
             <span className="truncate text-muted-foreground">
               Nothing has changed in this range.

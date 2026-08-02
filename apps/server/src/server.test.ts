@@ -789,6 +789,7 @@ const buildAppUnderTest = (options?: {
                 generatedAt: "1970-01-01T00:00:00.000Z",
                 range: { kind: "working-tree", baseRef: null, headRef: null },
                 steps: [],
+                aggregate: null,
                 citymap: {
                   version: 1,
                   repo: { root: input.cwd, dirty: false, generatedAt: "1970-01-01T00:00:00.000Z" },

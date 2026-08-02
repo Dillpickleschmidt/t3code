@@ -1,10 +1,32 @@
-import type { DiffOverlay } from "@t3tools/contracts";
+import type {
+  DiffOverlay,
+  DiffOverlayFile,
+  DiffOverlayStep,
+  ScopedThreadRef,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { TooltipProvider } from "~/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "~/components/ui/menu";
+import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "~/components/ui/tooltip";
 import { useTheme } from "~/hooks/useTheme";
+import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelStore";
+import { resolveDiffScope } from "../diffScope";
+import { useCheckpointDiff } from "../lib/checkpointDiffState";
+import { getRenderablePatch, resolveFileDiffPath } from "../lib/diffRendering";
 import { useClientSettings } from "../hooks/useSettings";
+import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
+import { useThread } from "../state/entities";
+import { formatShortTimestamp } from "../timestampFormat";
 import { PrimaryEnvironmentHttpClient } from "../environments/primary/httpClient";
 import { runPrimaryHttp } from "../lib/runtime";
 import { cssVariables, paletteFor, resolveScenePalette } from "./palette";
@@ -17,24 +39,33 @@ import { CommitScrubber } from "./ui/CommitScrubber";
 import "./surface.css";
 
 /**
- * 3D Diff: a range of commits played over the repository as stacked terrain.
+ * 3D Diff: a range of changes played over the repository as stacked terrain.
  *
- * A sibling of the 2D Diff panel rather than of 3D Watch Agent — it is keyed by
- * working directory, not by thread, and it steps *commits* rather than an
- * agent's tool calls. What it shares with Watch Agent is the stage: the same
- * `CityScene`, the same citymap, the same palette. All that differs is the
- * height policy, which is why adding it needed no second scene — see
- * `./scene/columns`.
+ * It draws the same four scopes the 2D Diff panel offers, out of the same
+ * stored selection, because it is a different renderer of that panel's query
+ * rather than a surface of its own. Two of those scopes are repository-shaped
+ * (working tree, branch) and two are thread-shaped (latest turn, a named
+ * turn), which is why it takes a thread ref alongside a working directory —
+ * the same mixture the 2D panel is, hosted the same way.
  *
- * The window is whatever the 2D panel's Automatic base resolves to, because
- * the server asks that panel's own service for it. There is deliberately no
- * base-ref picker in this first cut.
+ * What it does *not* do is keep its own copy of any of that. The scope comes
+ * from `diffPanelStore`, whitespace and timestamp handling come from T3's
+ * settings, and the turn scopes read the very query the 2D panel reads. The
+ * one piece of state it owns is the commit drill-down, because no 2D
+ * counterpart has one.
  */
-export default function DiffSurface({ cwd }: { cwd: string }) {
+export default function DiffSurface({
+  cwd,
+  threadRef,
+}: {
+  cwd: string;
+  /** Null when the surface is open without a thread — turn scopes disable. */
+  threadRef: ScopedThreadRef | null;
+}) {
   const { resolvedTheme } = useTheme();
-  // T3's own setting, not a default of ours: the 2D panel sends it on every
-  // request, and two diff surfaces disagreeing about whether whitespace counts
-  // would make both untrustworthy.
+  // T3's own settings, not defaults of ours: the 2D panel sends whitespace on
+  // every request and formats every turn's date with `timestampFormat`, and
+  // two diff surfaces disagreeing about either would make both untrustworthy.
   const { diffIgnoreWhitespace, timestampFormat } = useClientSettings();
   const palette = useMemo(() => paletteFor(resolvedTheme), [resolvedTheme]);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -53,11 +84,45 @@ export default function DiffSurface({ cwd }: { cwd: string }) {
 
   const scenePalette = resolved ?? palette.scene;
 
+  // ------------------------------------------------------------ the scope
+  //
+  // Read reactively rather than at mount: this surface is keyed by `cwd`
+  // (`ChatView`), so it does not remount when the thread changes and would
+  // otherwise be left drawing the scope of a thread it is no longer on.
+  const thread = useThread(threadRef);
+  const { orderedTurnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
+    useTurnDiffSummaries(thread);
+  const selection = useDiffPanelStore((state) =>
+    selectThreadDiffPanelSelection(state.byThreadKey, threadRef),
+  );
+  const scope = resolveDiffScope(
+    selection,
+    orderedTurnDiffSummaries,
+    inferredCheckpointTurnCountByTurnId,
+  );
+  const hasTurns = orderedTurnDiffSummaries.length > 0;
+
+  // Pointing at a turn the thread no longer has strands the store for the 2D
+  // panel too, so the surface reconciles rather than only tolerating it.
+  useEffect(() => {
+    if (!threadRef || selection.kind !== "turn") return;
+    useDiffPanelStore.getState().reconcileTurnSelection(
+      threadRef,
+      orderedTurnDiffSummaries.map((summary) => summary.turnId),
+    );
+  }, [selection, orderedTurnDiffSummaries, threadRef]);
+
   const [overlay, setOverlay] = useState<DiffOverlay | undefined>();
   const [error, setError] = useState<string | undefined>();
-  const [stepIndex, setStepIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | undefined>();
+  /**
+   * Which commit of the branch range the stage is standing in, or `null` for
+   * the whole range netted — the frame Branch changes opens on. The scrubber
+   * is a drill-down of that scope, so this is the surface's own state: no 2D
+   * entry has a position within a range.
+   */
+  const [drillStep, setDrillStep] = useState<number | null>(null);
 
   useEffect(() => {
     setOverlay(undefined);
@@ -78,9 +143,7 @@ export default function DiffSurface({ cwd }: { cwd: string }) {
       (result) => {
         if (cancelled) return;
         setOverlay(result);
-        // Open on the finished state, as Watch Agent does: the last frame is
-        // what you came to look at, and scrubbing back replays from there.
-        setStepIndex(Math.max(0, result.steps.length - 1));
+        setDrillStep(null);
       },
       (cause: unknown) => {
         if (!cancelled) setError(String(cause));
@@ -91,59 +154,176 @@ export default function DiffSurface({ cwd }: { cwd: string }) {
     };
   }, [cwd, diffIgnoreWhitespace]);
 
-  const city = overlay?.citymap as CityMap | undefined;
-  const steps = overlay?.steps ?? [];
-  const step = Math.min(stepIndex, Math.max(0, steps.length - 1));
-
-  // One step, one commit — steps do not accumulate. This is the same reading
-  // as every diff view in T3 and in an ordinary git client: "what did this
-  // commit change", not "what has changed so far". Scrubbing walks the branch
-  // commit by commit rather than watching a pile grow.
-  const churnByPath = useMemo(() => {
-    const totals = new Map<string, FileChurn>();
-    for (const file of steps[step]?.files ?? []) {
-      totals.set(file.path, { additions: file.additions, deletions: file.deletions });
-    }
-    return totals;
-  }, [steps, step]);
-
-  const columns = useMemo(
-    () => (city ? diffColumns(city, churnByPath, scenePalette) : []),
-    [city, churnByPath, scenePalette],
+  // ------------------------------------------------------- the turn's diff
+  //
+  // The checkpoint *summary* on the thread cannot drive this. Its counts are
+  // captured once, with `ignoreWhitespace: false` hardcoded
+  // (`CheckpointReactor.ts`), so a user on T3's default — ignore-whitespace on
+  // — would get a reformat rendered as towers here and as nothing in the 2D
+  // panel's view of the same turn. That is the drift this surface was just
+  // fixed for, so the turn scopes read the 2D panel's own query instead, on
+  // the identical target so the two share one fetch rather than making two.
+  const turnCount = scope.turnCount;
+  const turnDiff = useCheckpointDiff(
+    {
+      environmentId: threadRef?.environmentId ?? null,
+      threadId: threadRef?.threadId ?? null,
+      fromTurnCount: turnCount === undefined ? null : Math.max(0, turnCount - 1),
+      toTurnCount: turnCount ?? null,
+      ignoreWhitespace: diffIgnoreWhitespace,
+      cacheScope: scope.turn ? `turn:${scope.turn.turnId}` : null,
+    },
+    { enabled: scope.kind === "turn" && scope.turn !== undefined && turnCount !== undefined },
   );
 
-  // The tallest column anywhere in the range, so the camera frames for the
-  // whole scrub at once. Taking it from the current step instead would zoom
-  // the stage in and out as you step between a quiet commit and a busy one.
-  const tallestColumn = useMemo(() => {
-    let peak = 0;
-    for (const entry of steps) {
-      for (const file of entry.files) peak = Math.max(peak, file.additions + file.deletions);
+  const turnChurn = useMemo(() => {
+    const patch = getRenderablePatch(turnDiff.data?.diff, "mindwalk-diff3d");
+    if (!patch || patch.kind !== "files") return null;
+    const totals = new Map<string, FileChurn>();
+    for (const file of patch.files) {
+      // `a/`/`b/` stripped and repo-root-relative — the citymap's vocabulary,
+      // and the same resolution the 2D panel lists files under.
+      const path = resolveFileDiffPath(file);
+      if (!path) continue;
+      let additions = 0;
+      let deletions = 0;
+      for (const hunk of file.hunks) {
+        additions += hunk.additionLines;
+        deletions += hunk.deletionLines;
+      }
+      totals.set(path, { additions, deletions });
     }
-    return diffHeight(peak);
-  }, [steps]);
+    return totals;
+  }, [turnDiff.data?.diff]);
+
+  // ------------------------------------------------------------ the frame
+  const commitSteps = useMemo(
+    () => (overlay?.steps ?? []).filter((step) => step.kind === "commit"),
+    [overlay],
+  );
+  const workingStep = useMemo(
+    () => (overlay?.steps ?? []).find((step) => step.kind === "working-tree"),
+    [overlay],
+  );
+
+  // Scope changes clear the stage's own state. A column selected in one scope
+  // is usually not even present in the next, and a drill-down position means
+  // nothing outside the branch range that produced it.
+  const scopeKey = scope.kind === "turn" ? `turn:${scope.turn?.turnId ?? "none"}` : scope.kind;
+  useEffect(() => {
+    setSelectedPath(undefined);
+    setDrillStep(null);
+    setPlaying(false);
+  }, [scopeKey]);
+
+  const frame = useMemo((): Frame => {
+    switch (scope.kind) {
+      case "unstaged":
+        return workingStep
+          ? frameOf(workingStep.title, workingStep.files, [workingStep.files])
+          : emptyFrame("Uncommitted changes", "The working tree is clean.");
+      case "turn": {
+        if (!threadRef) return emptyFrame("Turn", "Open a thread to see its turns.");
+        if (!scope.turn) return emptyFrame(scope.label, "This thread has no turn checkpoints yet.");
+        if (turnDiff.error)
+          return emptyFrame(scope.label, `Could not load this turn: ${turnDiff.error}`);
+        if (!turnChurn) return emptyFrame(scope.label);
+        return frameOf(scope.label, turnChurn, [turnChurn]);
+      }
+      default: {
+        // Branch changes: the netted range, drilled into one commit at a time.
+        // Framing height comes from the range *and* the aggregate together, so
+        // the camera does not rescale as you step in and out of it.
+        const spans = [...commitSteps.map((step) => step.files), overlay?.aggregate ?? []];
+        if (drillStep !== null) {
+          const step = commitSteps[Math.min(drillStep, commitSteps.length - 1)];
+          return step
+            ? frameOf(step.title, step.files, spans)
+            : emptyFrame("Branch changes", "Nothing has changed in this range.");
+        }
+        if (!overlay) return emptyFrame("Branch changes");
+        return overlay.aggregate && overlay.aggregate.length > 0
+          ? frameOf(rangeLabel(overlay), overlay.aggregate, spans)
+          : emptyFrame(
+              "Branch changes",
+              overlay.aggregate === null
+                ? "This branch has no base to compare against yet."
+                : "Nothing has changed in this range.",
+            );
+      }
+    }
+  }, [
+    scope.kind,
+    scope.label,
+    scope.turn,
+    threadRef,
+    workingStep,
+    turnChurn,
+    turnDiff.error,
+    commitSteps,
+    overlay,
+    drillStep,
+  ]);
+
+  const city = overlay?.citymap as CityMap | undefined;
+
+  const columns = useMemo(
+    () => (city ? diffColumns(city, frame.churnByPath, scenePalette) : []),
+    [city, frame.churnByPath, scenePalette],
+  );
+
+  const tallestColumn = useMemo(() => diffHeight(frame.peakChurn), [frame.peakChurn]);
 
   const totals = useMemo(() => {
     let additions = 0;
     let deletions = 0;
-    for (const churn of churnByPath.values()) {
+    for (const churn of frame.churnByPath.values()) {
       additions += churn.additions;
       deletions += churn.deletions;
     }
-    return { additions, deletions, files: churnByPath.size };
-  }, [churnByPath]);
+    return { additions, deletions, files: frame.churnByPath.size };
+  }, [frame.churnByPath]);
+
+  /**
+   * Files this frame changed that the citymap has no building for.
+   *
+   * The standing rule is to check that two data sources agree on their
+   * vocabulary rather than assume it, and this is that check made visible
+   * instead of silent. It should read zero on the repository scopes, whose
+   * deleted files the endpoint raises as ghosts. The turn scopes are the
+   * honest exception: their ghosts would have to come from the same endpoint,
+   * which is keyed by working directory and knows nothing about this thread,
+   * so a file a turn *deleted* has nowhere to stand. Saying so beats drawing a
+   * frame that quietly omits it.
+   */
+  const offMapFiles = useMemo(() => {
+    if (!city || frame.churnByPath.size === 0) return 0;
+    const onMap = new Set(city.files.map((file) => file.path));
+    let missing = 0;
+    for (const path of frame.churnByPath.keys()) if (!onMap.has(path)) missing += 1;
+    return missing;
+  }, [city, frame.churnByPath]);
 
   const hoverMeta = useMemo(
     () => (file: CityFile) => {
-      const churn = churnByPath.get(file.path);
+      const churn = frame.churnByPath.get(file.path);
       if (!churn) return "unchanged";
       if (churn.additions === 0 && churn.deletions === 0) return "changed · no line count";
       return `+${churn.additions} −${churn.deletions}`;
     },
-    [churnByPath],
+    [frame.churnByPath],
   );
 
-  const selection = selectedPath === undefined ? {} : { selectedPath };
+  const selectTurn = (turnId: (typeof orderedTurnDiffSummaries)[number]["turnId"]) => {
+    if (!threadRef) return;
+    useDiffPanelStore.getState().selectTurn(threadRef, turnId);
+  };
+  const selectGitScope = (next: "branch" | "unstaged") => {
+    if (!threadRef) return;
+    useDiffPanelStore.getState().selectGitScope(threadRef, next);
+  };
+
+  const selection3d = selectedPath === undefined ? {} : { selectedPath };
   const mapUnavailable = city !== undefined && city.files.length === 0;
 
   return (
@@ -168,17 +348,93 @@ export default function DiffSurface({ cwd }: { cwd: string }) {
                 playing={playing}
                 tallestColumn={tallestColumn}
                 palette={scenePalette}
-                {...selection}
+                {...selection3d}
               />
               <div className="pointer-events-none absolute inset-0 p-5 @max-[900px]:px-4 @max-[900px]:py-3.5">
                 <div className="pointer-events-auto min-w-0">
-                  {/* The step's own title, because the terrain is one commit
-                      rather than a running total — without it there is nothing
-                      on screen saying which commit you are standing in. */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      className="mb-1.5 inline-flex h-6 max-w-full items-center gap-1 rounded-md bg-muted/70 px-2 font-medium text-foreground text-xs outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={`Diff scope: ${scope.label}`}
+                      disabled={!threadRef}
+                    >
+                      <span className="truncate">{scope.label}</span>
+                      <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-60">
+                      <DropdownMenuItem
+                        className={scope.kind === "unstaged" ? "bg-foreground/[0.08]" : undefined}
+                        onClick={() => selectGitScope("unstaged")}
+                      >
+                        <span>Working tree</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className={scope.kind === "branch" ? "bg-foreground/[0.08]" : undefined}
+                        onClick={() => selectGitScope("branch")}
+                      >
+                        <span>Branch changes</span>
+                      </DropdownMenuItem>
+                      <TurnEntryTooltip enabled={hasTurns}>
+                        <DropdownMenuItem
+                          disabled={!hasTurns}
+                          className={
+                            scope.kind === "turn" && scope.isLatestTurn
+                              ? "bg-foreground/[0.08]"
+                              : undefined
+                          }
+                          onClick={() => {
+                            const latest = orderedTurnDiffSummaries[0];
+                            if (latest) selectTurn(latest.turnId);
+                          }}
+                        >
+                          <span>Latest turn</span>
+                        </DropdownMenuItem>
+                      </TurnEntryTooltip>
+                      {hasTurns ? (
+                        <DropdownMenuSub>
+                          <DropdownMenuSubTrigger>Turn</DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent className="w-64">
+                            {orderedTurnDiffSummaries.map((summary) => {
+                              const count =
+                                summary.checkpointTurnCount ??
+                                inferredCheckpointTurnCountByTurnId[summary.turnId] ??
+                                "?";
+                              return (
+                                <DropdownMenuItem
+                                  key={summary.turnId}
+                                  className={
+                                    summary.turnId === scope.turn?.turnId
+                                      ? "bg-foreground/[0.08]"
+                                      : undefined
+                                  }
+                                  onClick={() => selectTurn(summary.turnId)}
+                                >
+                                  <span>Turn {count}</span>
+                                  <span className="ml-auto text-muted-foreground text-xs tabular-nums">
+                                    {formatShortTimestamp(summary.completedAt, timestampFormat)}
+                                  </span>
+                                </DropdownMenuItem>
+                              );
+                            })}
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub>
+                      ) : (
+                        <TurnEntryTooltip enabled={false}>
+                          <DropdownMenuItem disabled>
+                            <span>Turn</span>
+                          </DropdownMenuItem>
+                        </TurnEntryTooltip>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  {/* The frame's own title, because the terrain is one scope's
+                      answer rather than the repository's — without it there is
+                      nothing on screen saying what you are standing in. */}
                   <div className="truncate font-semibold text-foreground text-xl tracking-tight @max-[900px]:text-lg">
-                    {steps[step]?.title || basename(city.repo.root)}
+                    {frame.title || basename(city.repo.root)}
                   </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-muted-foreground">
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-muted-foreground text-xs">
                     <span>{basename(city.repo.root)}</span>
                     <span>{rangeLabel(overlay)}</span>
                     <span>
@@ -186,7 +442,13 @@ export default function DiffSurface({ cwd }: { cwd: string }) {
                     </span>
                     <span className="text-[var(--mw-diff-added)]">+{totals.additions}</span>
                     <span className="text-[var(--mw-diff-removed)]">−{totals.deletions}</span>
+                    {offMapFiles > 0 ? (
+                      <span className="text-muted-foreground/70">{offMapFiles} not on the map</span>
+                    ) : null}
                   </div>
+                  {frame.notice ? (
+                    <div className="mt-1 text-muted-foreground text-xs">{frame.notice}</div>
+                  ) : null}
                 </div>
               </div>
             </>
@@ -203,19 +465,81 @@ export default function DiffSurface({ cwd }: { cwd: string }) {
           ) : null}
         </div>
 
-        {overlay ? (
+        {/* One scope has a position within it; the other three are single
+            frames, and a scrubber under them would be three dead controls. */}
+        {overlay && scope.kind === "branch" ? (
           <CommitScrubber
             timestampFormat={timestampFormat}
-            steps={steps}
+            steps={commitSteps}
             rangeLabel={rangeLabel(overlay)}
-            currentStep={step}
-            onChange={setStepIndex}
+            currentStep={drillStep}
+            onChange={setDrillStep}
             playing={playing}
             onPlayingChange={setPlaying}
           />
         ) : null}
       </div>
     </TooltipProvider>
+  );
+}
+
+/** What one scope puts on the stage. */
+interface Frame {
+  readonly title: string;
+  readonly churnByPath: ReadonlyMap<string, FileChurn>;
+  /**
+   * The busiest file anywhere this scope can reach, not just in this frame.
+   * Taking it from the frame alone would zoom the stage in and out as you
+   * step between a quiet commit and a busy one.
+   */
+  readonly peakChurn: number;
+  /** Why there is nothing to draw, when there is nothing to draw. */
+  readonly notice?: string;
+}
+
+/** A frame's files, however the scope that produced them happened to hold them. */
+type ChurnSpan = ReadonlyArray<DiffOverlayFile> | ReadonlyMap<string, FileChurn>;
+
+function churnMapOf(files: ChurnSpan): ReadonlyMap<string, FileChurn> {
+  if (files instanceof Map) return files;
+  return new Map(
+    (files as ReadonlyArray<DiffOverlayFile>).map((file) => [
+      file.path,
+      { additions: file.additions, deletions: file.deletions },
+    ]),
+  );
+}
+
+function frameOf(title: string, files: ChurnSpan, framingSpans: ReadonlyArray<ChurnSpan>): Frame {
+  let peakChurn = 0;
+  for (const span of framingSpans) {
+    for (const churn of churnMapOf(span).values()) {
+      peakChurn = Math.max(peakChurn, churn.additions + churn.deletions);
+    }
+  }
+  return { title, churnByPath: churnMapOf(files), peakChurn };
+}
+
+const NO_FILES: ReadonlyMap<string, FileChurn> = new Map();
+
+/** Nothing to draw, and — unless the scope is still loading — why. */
+function emptyFrame(title: string, notice?: string): Frame {
+  return { title, churnByPath: NO_FILES, peakChurn: 0, ...(notice ? { notice } : {}) };
+}
+
+/**
+ * Turn scopes disable rather than disappear when there is nothing behind them,
+ * with the reason on hover — the same choice the surface picker makes for the
+ * cards it cannot offer. A disabled item does not take pointer events, so the
+ * tooltip hangs off a wrapper rather than the item.
+ */
+function TurnEntryTooltip({ enabled, children }: { enabled: boolean; children: React.ReactNode }) {
+  if (enabled) return <>{children}</>;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="block" />}>{children}</TooltipTrigger>
+      <TooltipPopup side="right">This thread has no turn checkpoints to show yet.</TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -242,7 +566,7 @@ function rangeLabel(overlay: DiffOverlay): string {
     case "branch-range":
       return `${overlay.range.baseRef ?? "base"} → ${head}`;
     case "recent-commits":
-      return `last ${overlay.steps.filter((step) => step.kind === "commit").length} commits`;
+      return `last ${overlay.steps.filter((step: DiffOverlayStep) => step.kind === "commit").length} commits`;
     case "working-tree":
       return "working tree";
   }

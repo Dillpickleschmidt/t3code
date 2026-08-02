@@ -19,7 +19,13 @@
  *
  * @module DiffOverlay
  */
-import type { Citymap, DiffOverlay, DiffOverlayFile, DiffOverlayStep } from "@t3tools/contracts";
+import type {
+  Citymap,
+  DiffOverlay,
+  DiffOverlayFile,
+  DiffOverlayRange,
+  DiffOverlayStep,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -81,6 +87,8 @@ export class DiffOverlayError extends Schema.TaggedErrorClass<DiffOverlayError>(
     operation: Schema.Literals([
       "log",
       "logTruncated",
+      "aggregate",
+      "aggregateTruncated",
       "workingTree",
       "workingTreeTruncated",
       "untracked",
@@ -167,14 +175,18 @@ export const make = Effect.gen(function* () {
     // to a ghost. This is a repository view, so it resolves to the repository.
     const root = handle?.repository.rootPath ?? cwd;
 
-    const { range, steps } = driver
+    const { range, steps, aggregate } = driver
       ? yield* readSteps(
           root,
           makeRunGit(root, driver, ignoreWhitespace),
           branchSource?.baseRef ?? null,
           branchSource?.headRef ?? null,
         )
-      : { range: workingTreeOnlyRange(), steps: [] as ReadonlyArray<DiffOverlayStep> };
+      : {
+          range: workingTreeOnlyRange(),
+          steps: [] as ReadonlyArray<DiffOverlayStep>,
+          aggregate: null,
+        };
 
     // A repository the builder cannot read still deserves a scrubber; the
     // trace endpoint degrades the same way, and for the same reason.
@@ -191,16 +203,20 @@ export const make = Effect.gen(function* () {
     // A file deleted somewhere in the range is absent from a citymap built
     // from the current tree, so it would have nowhere to draw its red column.
     // Ghosts are the same mechanism the trace uses for the same problem.
-    const citymap = citymapFailed ? base : withGhosts(base, ghostPathsOf(steps));
+    // The aggregate is asked separately rather than assumed to be covered by
+    // the steps: it runs with rename detection where they run `--no-renames`,
+    // so the two do not report the same path set over a range with a rename.
+    const citymap = citymapFailed ? base : withGhosts(base, ghostPathsOf(steps, aggregate ?? []));
 
     yield* Effect.annotateCurrentSpan({
       "diffOverlay.range": range.kind,
       "diffOverlay.step_count": steps.length,
+      "diffOverlay.aggregate_file_count": aggregate?.length ?? -1,
     });
     // The root, not the request: the payload describes that repository, and
     // echoing back a subdirectory the citymap does not cover would be a lie
     // the client would key its cache on.
-    return { cwd: root, generatedAt, range, steps, citymap } satisfies DiffOverlay;
+    return { cwd: root, generatedAt, range, steps, aggregate, citymap } satisfies DiffOverlay;
   });
 
   /**
@@ -243,7 +259,60 @@ export const make = Effect.gen(function* () {
         headRef: kind === "branch-range" ? headRef : null,
       },
       steps: working ? [...commits, working] : commits,
+      // Netted over the same window the steps cover, not over `baseRef`
+      // blindly: when the branch has not diverged, `baseRef..HEAD` is empty and
+      // the steps fall back to recent commits, so netting the base would hand
+      // the scrubber an aggregate that covers none of the commits under it.
+      // Where the 2D panel has anything to show at all, this is the identical
+      // range and therefore the identical numbers.
+      aggregate: yield* readAggregate(cwd, runGit, kind, baseRef, commits),
     } as const;
+  });
+
+  /**
+   * The window as one net frame. Deliberately a second git call rather than a
+   * fold of the steps: they carry churn, and a net diff is a different number
+   * on any file a range touches more than once.
+   *
+   * The revision expression is the one thing here worth reading twice.
+   * `branch-range` uses `<base>...HEAD`, character for character what the 2D
+   * panel's branch source runs, so the two agree by construction rather than by
+   * inspection. The `recent-commits` fallback has no base ref — its window is a
+   * commit count — so it nets from the parent of its oldest step, which is the
+   * same window the scrubber walks. Both are equivalent to the two-endpoint
+   * form there, since the parent is an ancestor of HEAD; the three-dot form is
+   * only load-bearing in the branch case.
+   *
+   * `--no-renames` is *not* passed, unlike everywhere else in this module. See
+   * the `aggregate` field's note in the contract: this frame is read against
+   * the 2D panel's numbers, so it asks the 2D panel's question.
+   */
+  const readAggregate = Effect.fn("DiffOverlay.readAggregate")(function* (
+    cwd: string,
+    runGit: RunGit,
+    kind: DiffOverlayRange["kind"],
+    baseRef: string | null,
+    commits: ReadonlyArray<DiffOverlayStep>,
+  ) {
+    const revisions =
+      kind === "branch-range" && baseRef
+        ? [`${baseRef}...HEAD`]
+        : kind === "recent-commits" && commits[0]
+          ? [`${commits[0].id}^`, "HEAD"]
+          : null;
+    if (!revisions) return null;
+
+    const result = yield* runGit("aggregate", ["diff", "--numstat", "-z", ...revisions, "--"]);
+    // Non-zero is an outcome to read, as it is for `readLog`. The reachable
+    // case is a `recent-commits` window that reaches the repository's root
+    // commit, whose `^` does not resolve — a repository with fewer commits
+    // than the fallback window. No base to net from is not an error, and the
+    // 2D panel shows an empty branch diff there too.
+    if (result.exitCode !== 0) return null;
+    if (result.stdoutTruncated) {
+      return yield* Effect.fail(new DiffOverlayError({ cwd, operation: "aggregateTruncated" }));
+    }
+    return parseNumstat(result.stdout);
   });
 
   /**
@@ -376,13 +445,18 @@ const LOG_ARGS = [
   "--format=%x00%H%x00%ct%x00%s",
 ] as const;
 
-/** Paths any step touched, for the citymap to raise ghosts against. */
-export function ghostPathsOf(steps: ReadonlyArray<DiffOverlayStep>): Array<string> {
+/**
+ * Paths any frame of the overlay touched, for the citymap to raise ghosts
+ * against — the steps and the aggregate alike, since the two run git with
+ * different rename settings and so do not always name the same files.
+ */
+export function ghostPathsOf(
+  steps: ReadonlyArray<DiffOverlayStep>,
+  aggregate: ReadonlyArray<DiffOverlayFile> = [],
+): Array<string> {
   const paths = new Set<string>();
-  for (const step of steps) {
-    for (const file of step.files) {
-      if (file.path !== "") paths.add(file.path);
-    }
+  for (const file of [...steps.flatMap((step) => step.files), ...aggregate]) {
+    if (file.path !== "") paths.add(file.path);
   }
   return [...paths];
 }
