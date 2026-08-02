@@ -212,6 +212,9 @@ export const make = Effect.gen(function* () {
       return parseCommitLog(result.stdout);
     });
 
+    // Two dots gives our commits only; three would add the base branch's too.
+    // The 2D panel's diff uses three for the same range — log and diff read
+    // dots differently, so the mismatch is correct and not a typo.
     const ranged = baseRef ? yield* readLog([`${baseRef}..HEAD`]) : [];
     const commits =
       ranged.length > 0 ? ranged : yield* readLog([`--max-count=${RECENT_COMMIT_STEPS}`, "HEAD"]);
