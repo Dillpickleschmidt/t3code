@@ -308,7 +308,9 @@ export function TreeScene({
       // `|| 0` above defers that case — but any later reflow invalidates the
       // framing just as much. Refit until the user takes the camera, after
       // which it is theirs and a resize must not yank it back.
-      else if (!userTookCamera) fitViewRef.current?.();
+      // A saved camera means a selection pan is in flight and deliberate;
+      // re-fitting would undo it and hide the selection behind the inspector.
+      else if (!userTookCamera && !preSelectCameraRef.current) fitViewRef.current?.();
       loopRef.current?.invalidate();
     };
     const observer = new ResizeObserver(resize);
