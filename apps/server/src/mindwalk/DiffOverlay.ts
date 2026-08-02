@@ -286,6 +286,16 @@ export const make = Effect.gen(function* () {
    * `--no-renames` is *not* passed, unlike everywhere else in this module. See
    * the `aggregate` field's note in the contract: this frame is read against
    * the 2D panel's numbers, so it asks the 2D panel's question.
+   *
+   * The rest of `AGGREGATE_ARGS` is that same rule applied to every flag that
+   * changes what git *counts*. `--minimal` is the one that bites: it is not a
+   * formatting option, it spends extra work finding a smaller diff, and on a
+   * heavily rewritten file it genuinely lands on a different one. Measured on
+   * this repo's own `DiffSurface.tsx`, dropping it reports 385/61 where the
+   * panel shows 384/60 — a file whose two panels disagree by a line, which is
+   * the whole failure this scope exists to prevent. `--no-ext-diff` and
+   * `--no-textconv` are here for the same reason: a configured external driver
+   * would otherwise be applied to one panel and not the other.
    */
   const readAggregate = Effect.fn("DiffOverlay.readAggregate")(function* (
     cwd: string,
@@ -302,7 +312,7 @@ export const make = Effect.gen(function* () {
           : null;
     if (!revisions) return null;
 
-    const result = yield* runGit("aggregate", ["diff", "--numstat", "-z", ...revisions, "--"]);
+    const result = yield* runGit("aggregate", [...AGGREGATE_ARGS, ...revisions, "--"]);
     // Non-zero is an outcome to read, as it is for `readLog`. The reachable
     // case is a `recent-commits` window that reaches the repository's root
     // commit, whose `^` does not resolve — a repository with fewer commits
@@ -443,6 +453,22 @@ const LOG_ARGS = [
   "-z",
   "--no-renames",
   "--format=%x00%H%x00%ct%x00%s",
+] as const;
+
+/**
+ * Every flag `GitVcsDriverCore.getReviewDiffPreview` passes that can change
+ * what git counts, so the aggregate and the 2D panel's branch source are the
+ * same diff in two output formats. Its `--patch`/`--no-color` have no numstat
+ * equivalent and its whitespace flag is applied by `makeRunGit`. Deliberately
+ * without `--no-renames` — see `readAggregate`.
+ */
+const AGGREGATE_ARGS = [
+  "diff",
+  "--numstat",
+  "-z",
+  "--minimal",
+  "--no-ext-diff",
+  "--no-textconv",
 ] as const;
 
 /**

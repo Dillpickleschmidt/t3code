@@ -441,7 +441,7 @@ describe("DiffOverlayService", () => {
       // into its own fields and the service reads the new one. Resolving that
       // here keeps the reference independent rather than papering over it.
       const expected = parsePlainNumstat(
-        yield* git(root, ["diff", "--numstat", `${commits[0]?.id}^`, "HEAD"]).pipe(
+        yield* git(root, ["diff", "--numstat", "--minimal", `${commits[0]?.id}^`, "HEAD"]).pipe(
           Effect.provide(layerFor(root)),
         ),
       ).map((file) => ({ ...file, path: renameTarget(file.path) }));
@@ -493,6 +493,56 @@ describe("DiffOverlayService", () => {
       assert.notInclude(aggregatePaths, "renamed-from.txt");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
+
+  // `--minimal` is not cosmetic: it spends extra work looking for a smaller
+  // diff and on a rewritten file lands on a different one, so a scope that
+  // omitted it would report different numbers from the 2D entry of the same
+  // name. Found by comparing the two on this repo, where the gap was a line.
+  // Pinned against the panel's own flags rather than against a number.
+  it("asks git the 2D panel's exact question, --minimal included", () =>
+    Effect.gen(function* () {
+      const root = yield* makeLongRepo();
+      const path = yield* Path.Path;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const run = (args: ReadonlyArray<string>) =>
+        git(root, args).pipe(Effect.provide(layerFor(root)));
+
+      // A wholesale rewrite, which is where the minimal-diff search diverges
+      // from the default one.
+      yield* fileSystem.writeFileString(
+        path.join(root, "rewritten.txt"),
+        Array.from({ length: 40 }, (_, index) => `original ${index}`).join("\n"),
+      );
+      yield* run(["add", "-A"]);
+      yield* run(["commit", "-m", "add rewritten"]);
+      yield* fileSystem.writeFileString(
+        path.join(root, "rewritten.txt"),
+        Array.from({ length: 40 }, (_, index) =>
+          index % 3 === 0 ? `replaced ${index}` : `original ${index}`,
+        ).join("\n"),
+      );
+      yield* run(["add", "-A"]);
+      yield* run(["commit", "-m", "rewrite it"]);
+
+      const overlay = yield* overlayAt(root);
+      const commits = overlay.steps.filter((step) => step.kind === "commit");
+
+      // The flags `GitVcsDriverCore.getReviewDiffPreview` passes, spelled here
+      // so this test fails if the aggregate's set ever drifts from the panel's.
+      const expected = parsePlainNumstat(
+        yield* git(root, [
+          "diff",
+          "--numstat",
+          "--minimal",
+          "--no-ext-diff",
+          "--no-textconv",
+          `${commits[0]?.id}^`,
+          "HEAD",
+        ]).pipe(Effect.provide(layerFor(root))),
+      ).map((file) => ({ ...file, path: renameTarget(file.path) }));
+
+      assert.deepEqual(byPath(overlay.aggregate ?? []), byPath(expected));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)));
 
   // Both frames' paths have to reach the citymap, and after the test above
   // they are not the same set.
