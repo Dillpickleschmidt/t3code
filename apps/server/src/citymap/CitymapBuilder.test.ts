@@ -4,6 +4,9 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
+
+import { Citymap } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -12,6 +15,8 @@ import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as CitymapBuilder from "./CitymapBuilder.ts";
 import goldenCitymap from "./__fixtures__/mindwalk-citymap.golden.json" with { type: "json" };
 import goldenTree from "./__fixtures__/tree.json" with { type: "json" };
+
+const encodeCitymap = Schema.encodeSync(Citymap);
 
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), { prefix: "t3-citymap-" });
 
@@ -186,11 +191,15 @@ it.layer(CitymapTestLayer)("CitymapBuilder", (it) => {
       const builder = yield* CitymapBuilder.CitymapBuilder;
       const city = yield* builder.buildForRoot(root);
 
+      // Encoded, not compared directly: the golden is mindwalk's own JSON, so
+      // the comparison has to be against the wire shape — which drops absent
+      // optional keys like `lang` rather than carrying them as undefined.
+      //
       // `repo` records the absolute root, HEAD, and build time, none of which
       // survive a move between machines. Everything else — ids, ordering,
       // line counts, langs, and every treemap rect — must match exactly.
-      const { repo: _repo, ...actual } = city;
-      assert.deepStrictEqual(JSON.parse(JSON.stringify(actual)), goldenCitymap);
+      const { repo: _repo, ...actual } = encodeCitymap(city);
+      assert.deepStrictEqual(actual, goldenCitymap);
     }),
   );
 
