@@ -10,7 +10,7 @@ import { cssVariables, paletteFor, resolveScenePalette } from "./palette";
 import type { ScenePalette } from "./palette";
 import type { FilePlayback } from "./playback/reducer";
 import { CityScene } from "./scene/CityScene";
-import { diffColumns, type FileChurn } from "./scene/columns";
+import { diffColumns, diffHeight, type FileChurn } from "./scene/columns";
 import type { CityFile, CityMap } from "./types";
 import { CommitScrubber } from "./ui/CommitScrubber";
 import "./surface.css";
@@ -97,21 +97,21 @@ export default function DiffSurface({ cwd }: { cwd: string }) {
     return totals;
   }, [steps, step]);
 
-  // The scale is the whole range's tallest column, not this step's, so height
-  // stays comparable as you scrub: a quiet commit reads as quiet instead of
-  // being stretched to fill the frame.
-  const fullHeightChurn = useMemo(() => {
+  const columns = useMemo(
+    () => (city ? diffColumns(city, churnByPath, scenePalette) : []),
+    [city, churnByPath, scenePalette],
+  );
+
+  // The tallest column anywhere in the range, so the camera frames for the
+  // whole scrub at once. Taking it from the current step instead would zoom
+  // the stage in and out as you step between a quiet commit and a busy one.
+  const tallestColumn = useMemo(() => {
     let peak = 0;
     for (const entry of steps) {
       for (const file of entry.files) peak = Math.max(peak, file.additions + file.deletions);
     }
-    return peak;
+    return diffHeight(peak);
   }, [steps]);
-
-  const columns = useMemo(
-    () => (city ? diffColumns(city, churnByPath, fullHeightChurn, scenePalette) : []),
-    [city, churnByPath, fullHeightChurn, scenePalette],
-  );
 
   const totals = useMemo(() => {
     let additions = 0;
@@ -156,6 +156,7 @@ export default function DiffSurface({ cwd }: { cwd: string }) {
                 hoverMeta={hoverMeta}
                 onSelect={setSelectedPath}
                 playing={playing}
+                tallestColumn={tallestColumn}
                 palette={scenePalette}
                 {...selection}
               />
