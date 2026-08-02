@@ -164,7 +164,13 @@ export class EnvironmentInternalError extends Schema.TaggedErrorClass<Environmen
   }
 }
 
-export const EnvironmentResourceNotFoundReason = Schema.Literals(["thread_not_found"]);
+// `cwd_not_found` answers a path outside the workspace as well as one that is
+// simply absent, deliberately: an endpoint keyed by caller-supplied path should
+// not distinguish "you may not look there" from "there is nothing there".
+export const EnvironmentResourceNotFoundReason = Schema.Literals([
+  "thread_not_found",
+  "cwd_not_found",
+]);
 export type EnvironmentResourceNotFoundReason = typeof EnvironmentResourceNotFoundReason.Type;
 
 export class EnvironmentResourceNotFoundError extends Schema.TaggedErrorClass<EnvironmentResourceNotFoundError>()(

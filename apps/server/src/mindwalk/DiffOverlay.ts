@@ -58,7 +58,15 @@ export class DiffOverlayError extends Schema.TaggedErrorClass<DiffOverlayError>(
   "DiffOverlayError",
   {
     cwd: Schema.String,
-    operation: Schema.Literals(["log", "logTruncated", "workingTree", "untracked"]),
+    operation: Schema.Literals([
+      "outsideWorkspace",
+      "log",
+      "logTruncated",
+      "workingTree",
+      "workingTreeTruncated",
+      "untracked",
+      "untrackedTruncated",
+    ]),
     cause: Schema.optionalKey(Schema.Defect()),
   },
 ) {
@@ -89,11 +97,25 @@ export const make = Effect.gen(function* () {
   )(function* (requestedCwd) {
     const cwd = path.resolve(requestedCwd);
     yield* Effect.annotateCurrentSpan({ "diffOverlay.cwd": cwd });
+
+    // The cwd is the client's, so it is bounded before anything reads the disk
+    // at it. Explicitly, and not as a side effect of the `getDiffPreview` call
+    // below: that call exists only to borrow the 2D panel's refs and is meant
+    // to disappear once this surface names its own base, which would silently
+    // take the boundary with it.
+    yield* review
+      .assertWorkspaceBoundCwd(cwd)
+      .pipe(
+        Effect.mapError(
+          (cause) => new DiffOverlayError({ cwd, operation: "outsideWorkspace", cause }),
+        ),
+      );
+
     const generatedAt = DateTime.formatIso(yield* DateTime.now);
 
-    // The refs, and only the refs. A cwd outside the workspace, or one that is
-    // not a repository at all, comes back as no sources rather than a failure,
-    // and degrades to a citymap with an empty scrubber.
+    // The refs, and only the refs. A cwd that is not a repository at all comes
+    // back as no sources rather than a failure, and degrades to a citymap with
+    // an empty scrubber.
     const preview = yield* review
       .getDiffPreview({ cwd })
       .pipe(
@@ -168,7 +190,7 @@ export const make = Effect.gen(function* () {
     const kind =
       ranged.length > 0 ? "branch-range" : commits.length > 0 ? "recent-commits" : "working-tree";
 
-    const working = yield* readWorkingTreeStep(runGit);
+    const working = yield* readWorkingTreeStep(cwd, runGit);
     return {
       range: {
         kind,
@@ -188,8 +210,13 @@ export const make = Effect.gen(function* () {
    * also the file set `listWorkspaceFiles` gives the citymap.
    */
   const readWorkingTreeStep = Effect.fn("DiffOverlay.readWorkingTreeStep")(function* (
+    cwd: string,
     runGit: RunGit,
   ) {
+    // Truncation is failure, not a short answer. Both of these list one entry
+    // per file, so a tree big enough to hit the output cap would come back as
+    // a prefix — and the final frame would quietly omit files rather than say
+    // it could not read them all. `readLog` refuses the same way.
     const tracked = yield* runGit("workingTree", [
       "diff",
       "--numstat",
@@ -198,12 +225,18 @@ export const make = Effect.gen(function* () {
       "HEAD",
       "--",
     ]);
+    if (tracked.stdoutTruncated) {
+      return yield* Effect.fail(new DiffOverlayError({ cwd, operation: "workingTreeTruncated" }));
+    }
     const untrackedList = yield* runGit("untracked", [
       "ls-files",
       "--others",
       "--exclude-standard",
       "-z",
     ]);
+    if (untrackedList.stdoutTruncated) {
+      return yield* Effect.fail(new DiffOverlayError({ cwd, operation: "untrackedTruncated" }));
+    }
     const untrackedPaths =
       untrackedList.exitCode === 0
         ? untrackedList.stdout.split("\0").filter((entry) => entry.length > 0)

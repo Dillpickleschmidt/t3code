@@ -247,4 +247,30 @@ describe("DiffOverlayService", () => {
       );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
+
+  // The cwd is the client's, and the two failures above both degrade rather
+  // than fail — so the boundary has to be its own answer, or "not a repo" and
+  // "not yours to read" become the same benign outcome and the overlay hands
+  // back a citymap of whatever path was asked for.
+  it.effect("refuses a cwd outside the configured workspace", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspace = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-diff-overlay-ws-",
+      });
+      const outside = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-diff-overlay-outside-",
+      });
+      yield* fileSystem.writeFileString(path.join(outside, "private.md"), "hello\n");
+
+      const error = yield* Effect.gen(function* () {
+        const service = yield* DiffOverlay.DiffOverlayService;
+        return yield* service.getOverlay(outside).pipe(Effect.flip);
+      }).pipe(Effect.provide(layerFor(workspace)));
+
+      assert.strictEqual(error._tag, "DiffOverlayError");
+      assert.strictEqual(error.operation, "outsideWorkspace");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 });

@@ -43,9 +43,19 @@ export const mindwalkHttpApiLayer = HttpApiBuilder.group(
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
 
-          return yield* diffOverlays
-            .getOverlay(args.query.cwd)
-            .pipe(Effect.catch((cause) => failEnvironmentInternal("diff_overlay_failed", cause)));
+          return yield* diffOverlays.getOverlay(args.query.cwd).pipe(
+            Effect.catch(
+              Effect.fnUntraced(function* (cause) {
+                // A path the caller may not read answers the same as one that
+                // is not there, so the response says nothing about what exists
+                // outside the workspace.
+                if (cause.operation === "outsideWorkspace") {
+                  return yield* failEnvironmentNotFound("cwd_not_found");
+                }
+                return yield* failEnvironmentInternal("diff_overlay_failed", cause);
+              }),
+            ),
+          );
         }),
       );
   }),
