@@ -94,6 +94,17 @@ export class DiffOverlayError extends Schema.TaggedErrorClass<DiffOverlayError>(
   }
 }
 
+/**
+ * `ignoreWhitespace` is the client's setting, not a server default. The 2D
+ * Diff panel sends it on every request, and a 3D surface that answered a
+ * different question about the same range would make both untrustworthy —
+ * a whitespace-only reformat is a tower in one and nothing in the other.
+ */
+export interface DiffOverlayInput {
+  readonly cwd: string;
+  readonly ignoreWhitespace: boolean;
+}
+
 export class DiffOverlayService extends Context.Service<
   DiffOverlayService,
   {
@@ -102,7 +113,7 @@ export class DiffOverlayService extends Context.Service<
      * configured workspace by `ReviewService` before any git runs against it.
      */
     readonly getOverlay: (
-      cwd: string,
+      input: DiffOverlayInput,
     ) => Effect.Effect<DiffOverlay, DiffOverlayError | DiffOverlayOutsideWorkspaceError>;
   }
 >()("t3/mindwalk/DiffOverlay/DiffOverlayService") {}
@@ -115,8 +126,9 @@ export const make = Effect.gen(function* () {
 
   const getOverlay: DiffOverlayService["Service"]["getOverlay"] = Effect.fn(
     "DiffOverlay.getOverlay",
-  )(function* (requestedCwd) {
-    const cwd = path.resolve(requestedCwd);
+  )(function* (input) {
+    const cwd = path.resolve(input.cwd);
+    const { ignoreWhitespace } = input;
     yield* Effect.annotateCurrentSpan({ "diffOverlay.cwd": cwd });
 
     // The cwd is the client's, so it is bounded before anything reads the disk
@@ -134,7 +146,7 @@ export const make = Effect.gen(function* () {
     // back as no sources rather than a failure, and degrades to a citymap with
     // an empty scrubber.
     const preview = yield* review
-      .getDiffPreview({ cwd })
+      .getDiffPreview({ cwd, ignoreWhitespace })
       .pipe(
         Effect.catchCause((cause) =>
           Effect.logDebug("diff overlay review preview failed; no refs to step", cause).pipe(
@@ -158,7 +170,7 @@ export const make = Effect.gen(function* () {
     const { range, steps } = driver
       ? yield* readSteps(
           root,
-          makeRunGit(root, driver),
+          makeRunGit(root, driver, ignoreWhitespace),
           branchSource?.baseRef ?? null,
           branchSource?.headRef ?? null,
         )
@@ -317,13 +329,29 @@ type RunGit = (
  * outcomes to read rather than failures (an empty range, a `--no-index` diff
  * that found a difference), while a spawn or timeout failure is real.
  */
-function makeRunGit(cwd: string, driver: VcsDriver.VcsDriver["Service"]): RunGit {
+function makeRunGit(
+  cwd: string,
+  driver: VcsDriver.VcsDriver["Service"],
+  ignoreWhitespace: boolean,
+): RunGit {
+  // Every command that *counts lines* takes the flag, so the log, the tracked
+  // diff and each untracked diff all answer the same question — applying it to
+  // some and not others would be a disagreement inside one response.
+  //
+  // `ls-files` only enumerates paths and rejects the flag outright, so the
+  // subcommand decides rather than the operation label, which lumps the
+  // untracked listing together with the diffs it feeds.
+  const withWhitespace = (args: ReadonlyArray<string>): ReadonlyArray<string> => {
+    const subcommand = args[0];
+    if (!ignoreWhitespace || (subcommand !== "log" && subcommand !== "diff")) return args;
+    return [subcommand, "--ignore-all-space", ...args.slice(1)];
+  };
   return (operation, args) =>
     driver
       .execute({
         operation: `DiffOverlay.${operation}`,
         cwd,
-        args,
+        args: withWhitespace(args),
         allowNonZeroExit: true,
         maxOutputBytes: LOG_MAX_OUTPUT_BYTES,
       })

@@ -1,7 +1,10 @@
 import { Ellipsis, Pause, Play, RotateCcw, StepBack, StepForward } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import type { TimestampFormat } from "@t3tools/contracts";
+
 import { Button } from "~/components/ui/button";
+import { sceneClock } from "./sceneClock";
 import type { Action, Mark, Trace } from "../types";
 
 interface TimelineProps {
@@ -13,6 +16,8 @@ interface TimelineProps {
    * frame loop — a scene must know it is playing to book continuous frames */
   playing: boolean;
   onPlayingChange: (playing: boolean) => void;
+  /** T3's 12/24-hour preference, so this surface's clock matches chat's. */
+  timestampFormat: TimestampFormat;
 }
 
 const BUCKETS = 160;
@@ -67,6 +72,7 @@ export function Timeline({
   onSubagentMark,
   playing,
   onPlayingChange,
+  timestampFormat,
 }: TimelineProps) {
   const [speed, setSpeed] = useState<Speed>(1);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -257,7 +263,7 @@ export function Timeline({
             {total > 0 ? `${seq + 1} / ${total}` : "0 / 0"}
           </span>
           <span className="block text-xs text-muted-foreground/70 tabular-nums">
-            {event?.ts ? clock(event.ts) : "—"}
+            {event?.ts ? sceneClock(event.ts, timestampFormat) : "—"}
           </span>
         </div>
 
@@ -468,12 +474,4 @@ function MarkGlyph({
       onClick={onClick}
     />
   );
-}
-
-function clock(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return [d.getHours(), d.getMinutes(), d.getSeconds()]
-    .map((n) => String(n).padStart(2, "0"))
-    .join(":");
 }

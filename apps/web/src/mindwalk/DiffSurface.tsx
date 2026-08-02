@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { TooltipProvider } from "~/components/ui/tooltip";
 import { useTheme } from "~/hooks/useTheme";
+import { useClientSettings } from "../hooks/useSettings";
 import { PrimaryEnvironmentHttpClient } from "../environments/primary/httpClient";
 import { runPrimaryHttp } from "../lib/runtime";
 import { cssVariables, paletteFor, resolveScenePalette } from "./palette";
@@ -31,6 +32,10 @@ import "./surface.css";
  */
 export default function DiffSurface({ cwd }: { cwd: string }) {
   const { resolvedTheme } = useTheme();
+  // T3's own setting, not a default of ours: the 2D panel sends it on every
+  // request, and two diff surfaces disagreeing about whether whitespace counts
+  // would make both untrustworthy.
+  const { diffIgnoreWhitespace, timestampFormat } = useClientSettings();
   const palette = useMemo(() => paletteFor(resolvedTheme), [resolvedTheme]);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const [resolved, setResolved] = useState<ScenePalette | undefined>();
@@ -62,7 +67,12 @@ export default function DiffSurface({ cwd }: { cwd: string }) {
     let cancelled = false;
     runPrimaryHttp(
       PrimaryEnvironmentHttpClient.pipe(
-        Effect.flatMap((client) => client.mindwalk.diffOverlay({ query: { cwd }, headers: {} })),
+        Effect.flatMap((client) =>
+          client.mindwalk.diffOverlay({
+            query: { cwd, ignoreWhitespace: diffIgnoreWhitespace ? "true" : "false" },
+            headers: {},
+          }),
+        ),
       ),
     ).then(
       (result) => {
@@ -79,7 +89,7 @@ export default function DiffSurface({ cwd }: { cwd: string }) {
     return () => {
       cancelled = true;
     };
-  }, [cwd]);
+  }, [cwd, diffIgnoreWhitespace]);
 
   const city = overlay?.citymap as CityMap | undefined;
   const steps = overlay?.steps ?? [];
@@ -195,6 +205,7 @@ export default function DiffSurface({ cwd }: { cwd: string }) {
 
         {overlay ? (
           <CommitScrubber
+            timestampFormat={timestampFormat}
             steps={steps}
             rangeLabel={rangeLabel(overlay)}
             currentStep={step}

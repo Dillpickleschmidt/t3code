@@ -540,6 +540,13 @@ const EnvironmentMindwalkQuery = Schema.Struct({
  */
 const EnvironmentDiffOverlayQuery = Schema.Struct({
   cwd: Schema.String,
+  /**
+   * The client's `diffIgnoreWhitespace` setting, which the 2D Diff panel
+   * already sends on every request. Carried rather than defaulted server-side
+   * so there is one answer to "does whitespace count", not two: a surface that
+   * quietly disagreed with the panel beside it would make both untrustworthy.
+   */
+  ignoreWhitespace: Schema.optional(Schema.String),
 });
 
 /**

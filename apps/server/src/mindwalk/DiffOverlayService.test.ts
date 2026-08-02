@@ -119,7 +119,7 @@ describe("DiffOverlayService", () => {
       const root = yield* makeRepo();
       const overlay = yield* Effect.gen(function* () {
         const service = yield* DiffOverlay.DiffOverlayService;
-        return yield* service.getOverlay(root);
+        return yield* service.getOverlay({ cwd: root, ignoreWhitespace: false });
       }).pipe(Effect.provide(layerFor(root)));
 
       const commits = overlay.steps.filter((step) => step.kind === "commit");
@@ -151,7 +151,7 @@ describe("DiffOverlayService", () => {
       const root = yield* makeRepo();
       const overlay = yield* Effect.gen(function* () {
         const service = yield* DiffOverlay.DiffOverlayService;
-        return yield* service.getOverlay(root);
+        return yield* service.getOverlay({ cwd: root, ignoreWhitespace: false });
       }).pipe(Effect.provide(layerFor(root)));
       const step = (title: string) => overlay.steps.find((entry) => entry.title === title);
 
@@ -173,7 +173,7 @@ describe("DiffOverlayService", () => {
       const root = yield* makeRepo();
       const overlay = yield* Effect.gen(function* () {
         const service = yield* DiffOverlay.DiffOverlayService;
-        return yield* service.getOverlay(root);
+        return yield* service.getOverlay({ cwd: root, ignoreWhitespace: false });
       }).pipe(Effect.provide(layerFor(root)));
 
       const last = overlay.steps.at(-1);
@@ -192,7 +192,7 @@ describe("DiffOverlayService", () => {
       const root = yield* makeRepo();
       const overlay = yield* Effect.gen(function* () {
         const service = yield* DiffOverlay.DiffOverlayService;
-        return yield* service.getOverlay(root);
+        return yield* service.getOverlay({ cwd: root, ignoreWhitespace: false });
       }).pipe(Effect.provide(layerFor(root)));
 
       // No remote and no other branch to diff against, which is the shape of
@@ -210,7 +210,7 @@ describe("DiffOverlayService", () => {
       const root = yield* makeRepo();
       const overlay = yield* Effect.gen(function* () {
         const service = yield* DiffOverlay.DiffOverlayService;
-        return yield* service.getOverlay(root);
+        return yield* service.getOverlay({ cwd: root, ignoreWhitespace: false });
       }).pipe(Effect.provide(layerFor(root)));
 
       assert.deepEqual(
@@ -236,7 +236,7 @@ describe("DiffOverlayService", () => {
 
       const overlay = yield* Effect.gen(function* () {
         const service = yield* DiffOverlay.DiffOverlayService;
-        return yield* service.getOverlay(root);
+        return yield* service.getOverlay({ cwd: root, ignoreWhitespace: false });
       }).pipe(Effect.provide(layerFor(root)));
 
       assert.deepEqual(overlay.range, { kind: "working-tree", baseRef: null, headRef: null });
@@ -263,7 +263,7 @@ describe("DiffOverlayService", () => {
 
       const overlay = yield* Effect.gen(function* () {
         const service = yield* DiffOverlay.DiffOverlayService;
-        return yield* service.getOverlay(nested);
+        return yield* service.getOverlay({ cwd: nested, ignoreWhitespace: false });
       }).pipe(Effect.provide(layerFor(root)));
 
       assert.strictEqual(overlay.cwd, root);
@@ -277,6 +277,50 @@ describe("DiffOverlayService", () => {
         overlay.steps.filter((step) => step.kind === "commit").map((step) => step.title),
         ["first", "main work", "merge side", "drop gone", "changed nothing", "", "add a binary"],
       );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  // The 2D Diff panel sends the user's `diffIgnoreWhitespace` on every request
+  // and it defaults to on, so a 3D surface that never asked would report a
+  // reformat as a tower while the panel beside it reported nothing.
+  it.effect("honours ignoreWhitespace, on the log and the working tree alike", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRepo();
+      const path = yield* Path.Path;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const run = (args: ReadonlyArray<string>) =>
+        git(root, args).pipe(Effect.provide(layerFor(root)));
+
+      // one commit that only re-indents, and the same in the working tree
+      yield* fileSystem.writeFileString(path.join(root, "ws.txt"), "a\nb\n");
+      yield* run(["add", "-A"]);
+      yield* run(["commit", "-m", "add ws"]);
+      yield* fileSystem.writeFileString(path.join(root, "ws.txt"), "    a\n    b\n");
+      yield* run(["add", "-A"]);
+      yield* run(["commit", "-m", "reindent"]);
+      yield* fileSystem.writeFileString(path.join(root, "ws.txt"), "        a\n        b\n");
+
+      const overlayFor = (ignoreWhitespace: boolean) =>
+        Effect.gen(function* () {
+          const service = yield* DiffOverlay.DiffOverlayService;
+          return yield* service.getOverlay({ cwd: root, ignoreWhitespace });
+        }).pipe(Effect.provide(layerFor(root)));
+
+      const counted = yield* overlayFor(false);
+      const ignored = yield* overlayFor(true);
+      const filesOf = (overlay: typeof counted, title: string) =>
+        overlay.steps.find((step) => step.title === title)?.files ?? [];
+
+      assert.isNotEmpty(filesOf(counted, "reindent"), "counted: the commit re-indents two lines");
+      assert.deepEqual(filesOf(ignored, "reindent"), [], "ignored: nothing but whitespace moved");
+
+      // and the working-tree step too, which runs a different git command
+      const dirty = (overlay: typeof counted) =>
+        (overlay.steps.find((step) => step.kind === "working-tree")?.files ?? []).map(
+          (file) => file.path,
+        );
+      assert.include(dirty(counted), "ws.txt");
+      assert.notInclude(dirty(ignored), "ws.txt");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
@@ -298,7 +342,9 @@ describe("DiffOverlayService", () => {
 
       const error = yield* Effect.gen(function* () {
         const service = yield* DiffOverlay.DiffOverlayService;
-        return yield* service.getOverlay(outside).pipe(Effect.flip);
+        return yield* service
+          .getOverlay({ cwd: outside, ignoreWhitespace: false })
+          .pipe(Effect.flip);
       }).pipe(Effect.provide(layerFor(workspace)));
 
       assert.strictEqual(error._tag, "DiffOverlayOutsideWorkspaceError");

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { TooltipProvider } from "~/components/ui/tooltip";
 import { useTheme } from "~/hooks/useTheme";
+import { useClientSettings } from "../hooks/useSettings";
 import { PrimaryEnvironmentHttpClient } from "../environments/primary/httpClient";
 import { runPrimaryHttp } from "../lib/runtime";
 import { cssVariables, paletteFor, resolveScenePalette } from "./palette";
@@ -41,6 +42,8 @@ interface Snapshot {
  */
 export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) {
   const { resolvedTheme } = useTheme();
+  // T3's own preference, so the scene's clock reads the same as chat's.
+  const { timestampFormat } = useClientSettings();
   const palette = useMemo(() => paletteFor(resolvedTheme), [resolvedTheme]);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const [resolved, setResolved] = useState<ScenePalette | undefined>();
@@ -206,6 +209,7 @@ export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) 
       presentation: "sheet",
       render: () => (
         <Inspector
+          timestampFormat={timestampFormat}
           {...(selectedFile && { file: selectedFile })}
           {...(selectedFile &&
             playback.touchByPath.get(selectedFile.path) && {
@@ -281,6 +285,7 @@ export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) 
 
         {snapshot ? (
           <Timeline
+            timestampFormat={timestampFormat}
             {...(trace && { trace })}
             currentSeq={seq}
             onChange={setCurrentSeq}

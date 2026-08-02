@@ -783,15 +783,15 @@ const buildAppUnderTest = (options?: {
             ...options?.layers?.mindwalkSnapshotService,
           }),
           Layer.mock(DiffOverlay.DiffOverlayService)({
-            getOverlay: (cwd) =>
+            getOverlay: (input) =>
               Effect.succeed({
-                cwd,
+                cwd: input.cwd,
                 generatedAt: "1970-01-01T00:00:00.000Z",
                 range: { kind: "working-tree", baseRef: null, headRef: null },
                 steps: [],
                 citymap: {
                   version: 1,
-                  repo: { root: cwd, dirty: false, generatedAt: "1970-01-01T00:00:00.000Z" },
+                  repo: { root: input.cwd, dirty: false, generatedAt: "1970-01-01T00:00:00.000Z" },
                   files: [],
                   dirs: [],
                   layout: { algorithm: "squarified-treemap-v1", weight: "" },

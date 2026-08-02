@@ -7,10 +7,14 @@
  * returning the overlay and the map it lands on, so a client never has to
  * reconcile two independently built layouts.
  *
- * Steps run oldest to newest and each carries only its own change; the client
- * sums steps 1..i for the frame at position i. Sums are *churn*, not a net
- * diff — a line added and later removed counts twice, because the surface is
- * asking "how much work landed here", not "what does the patch say".
+ * Steps run oldest to newest and each carries only its own change, which is
+ * also how each is shown: the scrubber walks the branch commit by commit
+ * rather than watching a total accumulate, matching every other diff view in
+ * T3 and any ordinary git client.
+ *
+ * A step's counts are *churn* rather than a net diff — ten lines swapped for
+ * ten others is twenty, not zero — because the surface is asking "how much
+ * work landed here", not "what does the patch say".
  */
 import * as Schema from "effect/Schema";
 

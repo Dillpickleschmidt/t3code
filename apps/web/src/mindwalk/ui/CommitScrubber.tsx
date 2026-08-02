@@ -1,8 +1,9 @@
-import type { DiffOverlayStep } from "@t3tools/contracts";
+import type { DiffOverlayStep, TimestampFormat } from "@t3tools/contracts";
 import { Pause, Play, RotateCcw, StepBack, StepForward } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { Button } from "~/components/ui/button";
+import { formatShortTimestamp } from "../../timestampFormat";
 
 interface CommitScrubberProps {
   steps: readonly DiffOverlayStep[];
@@ -14,6 +15,10 @@ interface CommitScrubberProps {
    * frame loop — a scene must know it is playing to book continuous frames */
   playing: boolean;
   onPlayingChange: (playing: boolean) => void;
+  /** T3's own timestamp preference. Passed in rather than read here so the
+   * component stays presentational, and hand-rolled rather than never — the
+   * 2D panel's turn list formats with the same setting. */
+  timestampFormat: TimestampFormat;
 }
 
 /** A commit is a bigger unit than a tool call, so it gets longer on screen. */
@@ -40,6 +45,7 @@ export function CommitScrubber({
   currentStep,
   onChange,
   playing,
+  timestampFormat,
   onPlayingChange,
 }: CommitScrubberProps) {
   const total = steps.length;
@@ -158,7 +164,7 @@ export function CommitScrubber({
             {total > 0 ? `${step + 1} / ${total}` : "0 / 0"}
           </span>
           <span className="block text-xs text-muted-foreground/70 tabular-nums">
-            {current ? day(current.committedAt) : "—"}
+            {current ? day(current.committedAt, timestampFormat) : "—"}
           </span>
         </div>
 
@@ -225,10 +231,14 @@ function stepWord(step: DiffOverlayStep): string {
   return step.kind === "working-tree" ? "working tree" : step.id.slice(0, 7);
 }
 
-function day(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+/**
+ * A commit's date, in whatever format the user picked. `formatShortTimestamp`
+ * is the same helper the 2D Diff panel's turn list uses, which is the point:
+ * a second date format in a sibling surface is a setting that silently does
+ * not apply.
+ */
+function day(iso: string, timestampFormat: TimestampFormat): string {
+  return formatShortTimestamp(iso, timestampFormat);
 }
 
 function IconButton({

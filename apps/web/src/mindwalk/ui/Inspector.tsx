@@ -1,6 +1,9 @@
 import { AlertTriangle, X } from "lucide-react";
 
+import type { TimestampFormat } from "@t3tools/contracts";
+
 import { Button } from "~/components/ui/button";
+import { sceneClock } from "./sceneClock";
 import { touchWord, type CityFile, type Touch, type TraceEvent } from "../types";
 
 interface InspectorProps {
@@ -10,6 +13,8 @@ interface InspectorProps {
   history: TraceEvent[];
   onClose: () => void;
   onJumpTo: (seq: number) => void;
+  /** T3's 12/24-hour preference, so this surface's clock matches chat's. */
+  timestampFormat: TimestampFormat;
 }
 
 /** Touch words carry the scene's own colors, so the panel agrees with the
@@ -31,7 +36,14 @@ const ACTION_COLOR: Record<string, string> = {
 
 // dock panel content: the selected file's identity, touch state, and visit
 // history. The Dock owns positioning; this owns only its own markup.
-export function Inspector({ file, touch, history, onClose, onJumpTo }: InspectorProps) {
+export function Inspector({
+  file,
+  touch,
+  history,
+  onClose,
+  onJumpTo,
+  timestampFormat,
+}: InspectorProps) {
   if (!file) {
     return (
       <div className="flex h-full flex-col p-3" aria-label="File inspector">
@@ -98,7 +110,7 @@ export function Inspector({ file, touch, history, onClose, onJumpTo }: Inspector
                 </strong>
                 <span className="min-w-0 flex-1 truncate text-muted-foreground">{event.tool}</span>
                 <span className="shrink-0 text-xs text-muted-foreground/70 tabular-nums">
-                  {event.ts ? clock(event.ts) : ""}
+                  {event.ts ? sceneClock(event.ts, timestampFormat) : ""}
                 </span>
                 {event.isError ? (
                   <AlertTriangle className="shrink-0 text-destructive" size={13} />
@@ -142,12 +154,4 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
       <dd className="mt-0.5 text-foreground tabular-nums">{children}</dd>
     </div>
   );
-}
-
-function clock(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return [d.getHours(), d.getMinutes(), d.getSeconds()]
-    .map((n) => String(n).padStart(2, "0"))
-    .join(":");
 }
