@@ -147,6 +147,8 @@ export function CityScene({
   // camera fit deferred while the viewport reports no size (hidden pane,
   // background tab); resize retries it instead of leaving the camera at NaN
   const fitPendingRef = useRef<(() => boolean) | null>(null);
+  /** the live fit, so the resize handler in the other effect can re-run it */
+  const fitViewRef = useRef<(() => boolean) | null>(null);
 
   const bounds = useMemo(() => {
     if (!city || city.files.length === 0) return { cx: 0, cz: 0, size: 120, halfW: 60, halfD: 60 };
@@ -181,7 +183,7 @@ export function CityScene({
 
     const camera = new THREE.PerspectiveCamera(
       38,
-      host.clientWidth / host.clientHeight || 1,
+      host.clientWidth / host.clientHeight || 0,
       0.1,
       2400,
     );
@@ -217,7 +219,9 @@ export function CityScene({
     };
     if (!reduced) driftTimer = setTimeout(stopDrift, ATTRACT_DRIFT_MS);
     const tip = new SceneTip(host);
+    let userTookCamera = false;
     controls.addEventListener("start", () => {
+      userTookCamera = true;
       stopDrift();
       tip.hide();
     });
@@ -307,6 +311,12 @@ export function CityScene({
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       if (fitPendingRef.current?.()) fitPendingRef.current = null;
+      // A fit is only correct for the size it was computed at. The scene can
+      // mount at a transient size — an inactive surface tab is zero-sized, and
+      // `|| 0` above defers that case — but any later reflow invalidates the
+      // framing just as much. Refit until the user takes the camera, after
+      // which it is theirs and a resize must not yank it back.
+      else if (!userTookCamera) fitViewRef.current?.();
       loopRef.current?.invalidate();
     };
     const observer = new ResizeObserver(resize);
@@ -573,10 +583,12 @@ export function CityScene({
       controls.update();
       return true;
     };
+    fitViewRef.current = fitView;
     fitPendingRef.current = fitView() ? null : fitView;
 
     return () => {
       fitPendingRef.current = null;
+      fitViewRef.current = null;
       loopRef.current?.invalidate();
       disposeGroup(group);
       scene.remove(group);
