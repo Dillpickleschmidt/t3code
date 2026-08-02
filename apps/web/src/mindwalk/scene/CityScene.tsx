@@ -41,6 +41,16 @@ interface CitySceneProps {
   hoverMeta?: (file: CityFile) => string;
   // the scrubber is playing: the one state that earns a continuous frame loop
   playing?: boolean;
+  /**
+   * The tallest column this surface will ever draw, so the camera frames for
+   * it. Fitting the ground alone was fine while columns were a fraction of the
+   * map's width, and crops them once they are not.
+   *
+   * The surface's figure, not the frame's: taking it from the columns actually
+   * on stage would rescale the view every time the scrubber moved between a
+   * quiet commit and a busy one.
+   */
+  tallestColumn?: number;
   /** Colours the stage renders in. Resolved by the surface, not derived
    * here, so both scenes and the chrome around them agree — including the
    * sky, which is read from T3's own `--background`. */
@@ -91,6 +101,7 @@ export function CityScene({
   onCanvasReady,
   hoverMeta,
   playing = false,
+  tallestColumn = 0,
   palette,
 }: CitySceneProps) {
   // A palette switch rebuilds the stage rather than mutating every material in
@@ -130,6 +141,10 @@ export function CityScene({
   hoverMetaRef.current = hoverMeta;
   const playingRef = useRef(playing);
   playingRef.current = playing;
+  const tallestColumnRef = useRef(tallestColumn);
+  tallestColumnRef.current = tallestColumn;
+  /** the user has framed the stage themselves; nothing auto-fits over that */
+  const userTookCameraRef = useRef(false);
   // camera fit deferred while the viewport reports no size (hidden pane,
   // background tab); resize retries it instead of leaving the camera at NaN
   const fitPendingRef = useRef<(() => boolean) | null>(null);
@@ -218,9 +233,9 @@ export function CityScene({
     };
     if (!reduced) driftTimer = setTimeout(stopDrift, ATTRACT_DRIFT_MS);
     const tip = new SceneTip(host);
-    let userTookCamera = false;
+    userTookCameraRef.current = false;
     controls.addEventListener("start", () => {
-      userTookCamera = true;
+      userTookCameraRef.current = true;
       preSelectCameraRef.current = null;
       stopDrift();
       tip.hide();
@@ -313,7 +328,7 @@ export function CityScene({
       // which it is theirs and a resize must not yank it back.
       // A saved camera means a selection pan is in flight and deliberate;
       // re-fitting would undo it and hide the selection behind the inspector.
-      else if (!userTookCamera && !preSelectCameraRef.current) fitViewRef.current?.();
+      else if (!userTookCameraRef.current && !preSelectCameraRef.current) fitViewRef.current?.();
       loopRef.current?.invalidate();
     };
     const observer = new ResizeObserver(resize);
@@ -577,9 +592,14 @@ export function CityScene({
       if (!camera || !controls) return true;
       const dir = new THREE.Vector3(0.46, 1.08, 0.72).normalize();
       const corners: THREE.Vector3[] = [];
-      for (const sx of [-1, 1]) {
-        for (const sz of [-1, 1]) {
-          corners.push(new THREE.Vector3(sx * bounds.halfW, 0, sz * bounds.halfD));
+      // the plain's corners at ground level, and again at the height of the
+      // tallest column: a column stands where a file does, so its apex can be
+      // anywhere over the map, and fitting the ground alone would crop it
+      for (const sy of tallestColumnRef.current > 0 ? [0, tallestColumnRef.current] : [0]) {
+        for (const sx of [-1, 1]) {
+          for (const sz of [-1, 1]) {
+            corners.push(new THREE.Vector3(sx * bounds.halfW, sy, sz * bounds.halfD));
+          }
         }
       }
       const fitted = fitDistance(camera, dir, corners);
@@ -747,6 +767,17 @@ export function CityScene({
   useEffect(() => {
     loopRef.current?.invalidate();
   }, [playing]);
+
+  // The stage is built before the data that says how tall it needs to be, so
+  // the first fit framed the ground alone. Refit once that number lands — but
+  // never over the user's own framing, and never over a selection pan, which
+  // are the same two exclusions the resize handler makes.
+  useEffect(() => {
+    if (tallestColumn <= 0) return;
+    if (userTookCameraRef.current || preSelectCameraRef.current) return;
+    fitViewRef.current?.();
+    loopRef.current?.invalidate();
+  }, [tallestColumn]);
 
   return <div className="city-scene" ref={hostRef} aria-label="Attention terrain" />;
 }

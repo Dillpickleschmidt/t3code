@@ -158,8 +158,36 @@ export interface FileChurn {
   readonly deletions: number;
 }
 
-/** The tallest a column gets, which is the file with the most churn in frame. */
-const DIFF_MAX_H = 16;
+/**
+ * The two numbers that set how tall a diff column stands, and the only two to
+ * touch when it looks wrong:
+ *
+ *   height = DIFF_HEIGHT_GAIN × ln(1 + churn / DIFF_HEIGHT_KNEE)
+ *
+ * `GAIN` is overall scale — raise it and everything grows together. `KNEE` is
+ * where the curve stops being roughly linear and starts compressing; below it
+ * a few lines stay a nub, above it each multiplication of churn adds a fixed
+ * amount rather than a proportional one.
+ *
+ * Anchors these produce, against the 120-wide world:
+ *
+ *   1 line      0.9  (the floor)      478      20.5
+ *   26          7.5                   1,300    25.3
+ *   92         12.8                   5,000    31.7
+ *   232        17.1                   20,000   38.4
+ *
+ * Unbounded on purpose, and safe because it grows so slowly: ten times the
+ * churn is a fixed step taller, not ten times taller, so no repository can
+ * produce a column that leaves the stage. `CityScene` fits the camera around
+ * the tallest one rather than the ground alone, so nothing crops either.
+ */
+const DIFF_HEIGHT_GAIN = 4.83;
+const DIFF_HEIGHT_KNEE = 7;
+
+/** How tall one file's column stands for a given number of changed lines. */
+export function diffHeight(churn: number): number {
+  return DIFF_HEIGHT_GAIN * Math.log1p(Math.max(churn, 0) / DIFF_HEIGHT_KNEE);
+}
 /**
  * The shortest a whole column is ever drawn, so a one-line change in a range
  * of thousands is still a building rather than bare ground. Several times the
@@ -186,18 +214,25 @@ const MIN_SEGMENT_H = 0.35;
  * Red on top because a tilted camera occludes column bases in a dense city but
  * never their tops.
  *
- * Height is linear in churn rather than log-scaled the way `sizeColumns` is:
- * a diff range covers tens of files where the static map covers tens of
- * thousands, so there is no long tail to compress, and "which file took the
- * most work" is exactly the question the surface is asked.
+ * **Height is absolute, and log-scaled.** Both were wrong in the first cut and
+ * the difference is visible the moment you open it.
  *
- * `fullHeightChurn` is the churn a full-height column stands for, and the
- * caller passes it rather than it being taken from `churnByPath`, because the
- * scale has to outlive the frame. Each step shows only its own commit, so
- * scaling to whatever is on screen would give every commit a full-height
- * tower and a three-line change would look like a three-thousand-line one.
- * Scaling to the largest file in the whole range instead makes a small commit
- * look small, and matches the scrubber's bars, which normalise the same way.
+ * Log, because churn is heavily skewed: over this repo's last thirty commits
+ * the median changed file is 26 lines against a busiest of 478, so a linear
+ * scale put **two thirds of every city on the floor**. The earlier reasoning —
+ * that a diff range has no long tail because it covers tens of files rather
+ * than thousands — confused how many files there are with how their churn is
+ * spread. It is the spread that decides.
+ *
+ * Absolute, because a scale taken from the range means the same file is a
+ * different height depending on what it is next to. Fixed anchors let height
+ * mean one thing everywhere: across steps, across ranges, across repositories.
+ * A quiet commit is then genuinely flat, which is the honest picture of a
+ * quiet commit.
+ *
+ * What height does not carry is precision at the top — 5,000 lines and 8,000
+ * are about one unit apart. That is inherent to staying on screen, and the
+ * hover readout gives the exact counts.
  *
  * A binary file arrives from the endpoint as `0`/`0` — it has a path and no
  * lines to count. It gets one minimum-height segment in the neutral grey
@@ -207,14 +242,11 @@ const MIN_SEGMENT_H = 0.35;
 export function diffColumns(
   city: CityMap,
   churnByPath: ReadonlyMap<string, FileChurn>,
-  fullHeightChurn: number,
   palette: ScenePalette,
 ): Column[] {
   const added = new THREE.Color(palette.city.diffAdded);
   const removed = new THREE.Color(palette.city.diffRemoved);
   const neutral = new THREE.Color(palette.city.unvisited);
-
-  const maxChurn = Math.max(fullHeightChurn, 0);
 
   const columns: Column[] = [];
   for (const file of city.files) {
@@ -228,7 +260,7 @@ export function diffColumns(
       });
       continue;
     }
-    const height = Math.max((maxChurn > 0 ? total / maxChurn : 0) * DIFF_MAX_H, MIN_COLUMN_H);
+    const height = Math.max(diffHeight(total), MIN_COLUMN_H);
     const addColor = () => ghosted(added.clone(), file, palette);
     const removeColor = () => ghosted(removed.clone(), file, palette);
     if (churn.deletions === 0) {
