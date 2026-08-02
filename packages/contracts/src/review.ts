@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { GitCommandError } from "./git.ts";
@@ -53,8 +54,15 @@ export const ReviewDiffPreviewSource = Schema.Struct({
   diff: Schema.String,
   diffHash: TrimmedNonEmptyString,
   truncated: Schema.Boolean,
-  /** Every file this source touched. Empty unless `includeFileStats`. */
-  files: Schema.Array(ReviewDiffFileStat),
+  /**
+   * Every file this source touched. Empty unless `includeFileStats`.
+   *
+   * Wire-optional with a decoded default, not required: clients and servers
+   * upgrade independently here — a web client on app.t3.codes can be newer
+   * than the `npx t3` server it pairs with — and a required field added to a
+   * response is a decode failure against every server that predates it.
+   */
+  files: Schema.Array(ReviewDiffFileStat).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export type ReviewDiffPreviewSource = typeof ReviewDiffPreviewSource.Type;
 
