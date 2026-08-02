@@ -147,10 +147,18 @@ export const make = Effect.gen(function* () {
     const handle = yield* registry.detect({ cwd }).pipe(Effect.orElseSucceed(() => null));
     const driver = handle?.kind === "git" ? handle.driver : null;
 
+    // Everything below runs at the repository root, not at the requested cwd.
+    // `git log --numstat` reports paths relative to the root wherever it runs,
+    // while the citymap walks whatever directory it is handed — so a cwd of
+    // `<repo>/src` would pair root-relative step paths against a citymap of
+    // `src` alone, and every column would miss its building and fall through
+    // to a ghost. This is a repository view, so it resolves to the repository.
+    const root = handle?.repository.rootPath ?? cwd;
+
     const { range, steps } = driver
       ? yield* readSteps(
-          cwd,
-          makeRunGit(cwd, driver),
+          root,
+          makeRunGit(root, driver),
           branchSource?.baseRef ?? null,
           branchSource?.headRef ?? null,
         )
@@ -159,10 +167,10 @@ export const make = Effect.gen(function* () {
     // A repository the builder cannot read still deserves a scrubber; the
     // trace endpoint degrades the same way, and for the same reason.
     let citymapFailed = false;
-    const base = yield* citymapBuilder.buildForRoot(cwd).pipe(
+    const base = yield* citymapBuilder.buildForRoot(root).pipe(
       Effect.catchCause((cause) =>
         Effect.logDebug("diff overlay citymap build failed; serving steps only", cause).pipe(
-          Effect.as(emptyCitymap(cwd, generatedAt)),
+          Effect.as(emptyCitymap(root, generatedAt)),
           Effect.tap(() => Effect.sync(() => (citymapFailed = true))),
         ),
       ),
@@ -177,7 +185,10 @@ export const make = Effect.gen(function* () {
       "diffOverlay.range": range.kind,
       "diffOverlay.step_count": steps.length,
     });
-    return { cwd, generatedAt, range, steps, citymap } satisfies DiffOverlay;
+    // The root, not the request: the payload describes that repository, and
+    // echoing back a subdirectory the citymap does not cover would be a lie
+    // the client would key its cache on.
+    return { cwd: root, generatedAt, range, steps, citymap } satisfies DiffOverlay;
   });
 
   /**

@@ -248,6 +248,38 @@ describe("DiffOverlayService", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  // `git log --numstat` reports root-relative paths wherever it runs, but the
+  // citymap walks the directory it is given — so a subdirectory cwd would pair
+  // whole-repo steps against a fragment of a city and every column would miss
+  // its building.
+  it.effect("resolves a subdirectory cwd to the repository root", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRepo();
+      const path = yield* Path.Path;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const nested = path.join(root, "nested");
+      yield* fileSystem.makeDirectory(nested);
+      yield* fileSystem.writeFileString(path.join(nested, "deep.txt"), "one\n");
+
+      const overlay = yield* Effect.gen(function* () {
+        const service = yield* DiffOverlay.DiffOverlayService;
+        return yield* service.getOverlay(nested);
+      }).pipe(Effect.provide(layerFor(root)));
+
+      assert.strictEqual(overlay.cwd, root);
+      // A file outside the requested subdirectory still has a building, which
+      // is the whole point: the steps name it, so the city must contain it.
+      assert.include(
+        overlay.citymap.files.map((file) => file.path),
+        "a.txt",
+      );
+      assert.deepEqual(
+        overlay.steps.filter((step) => step.kind === "commit").map((step) => step.title),
+        ["first", "main work", "merge side", "drop gone", "changed nothing", "", "add a binary"],
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   // The cwd is the client's, and the two failures above both degrade rather
   // than fail — so the boundary has to be its own answer, or "not a repo" and
   // "not yours to read" become the same benign outcome and the overlay hands
