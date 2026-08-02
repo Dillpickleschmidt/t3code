@@ -4,6 +4,7 @@ import type {
   DiffOverlayStep,
   ScopedThreadRef,
 } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
 import * as Effect from "effect/Effect";
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -25,6 +26,7 @@ import { useCheckpointDiff } from "../lib/checkpointDiffState";
 import { getRenderablePatch, resolveFileDiffPath } from "../lib/diffRendering";
 import { useClientSettings } from "../hooks/useSettings";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
+import { serverEnvironment } from "../state/server";
 import { useThread } from "../state/entities";
 import { formatShortTimestamp } from "../timestampFormat";
 import { PrimaryEnvironmentHttpClient } from "../environments/primary/httpClient";
@@ -112,6 +114,13 @@ export default function DiffSurface({
     );
   }, [selection, orderedTurnDiffSummaries, threadRef]);
 
+  // The environment's own working directory, which is what the server bounds
+  // diff requests to. Only read for the retry below.
+  const serverConfig = useAtomValue(
+    serverEnvironment.configValueAtom(threadRef?.environmentId ?? null),
+  );
+  const environmentCwd = serverConfig?.cwd;
+
   const [overlay, setOverlay] = useState<DiffOverlay | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [playing, setPlaying] = useState(false);
@@ -130,29 +139,48 @@ export default function DiffSurface({
     setSelectedPath(undefined);
     setPlaying(false);
     let cancelled = false;
-    runPrimaryHttp(
-      PrimaryEnvironmentHttpClient.pipe(
-        Effect.flatMap((client) =>
-          client.mindwalk.diffOverlay({
-            query: { cwd, ignoreWhitespace: diffIgnoreWhitespace ? "true" : "false" },
-            headers: {},
-          }),
+
+    const fetchAt = (at: string) =>
+      runPrimaryHttp(
+        PrimaryEnvironmentHttpClient.pipe(
+          Effect.flatMap((client) =>
+            client.mindwalk.diffOverlay({
+              query: { cwd: at, ignoreWhitespace: diffIgnoreWhitespace ? "true" : "false" },
+              headers: {},
+            }),
+          ),
         ),
-      ),
-    ).then(
-      (result) => {
-        if (cancelled) return;
-        setOverlay(result);
-        setDrillStep(null);
-      },
-      (cause: unknown) => {
-        if (!cancelled) setError(String(cause));
-      },
-    );
+      );
+
+    // The project's directory is not always inside the server's configured
+    // workspace — a server started in a subdirectory of the repository it is
+    // serving bounds itself to that subdirectory, which is what an ordinary
+    // `vp run dev` produces. The 2D panel has always retried at the
+    // environment's own cwd when that happens (`DiffPanel.tsx`), and every
+    // reason this surface exists says it should behave the same: the whole
+    // point is to be a different renderer of that panel's query, and a repo
+    // view that dies where the panel beside it succeeds is not one.
+    fetchAt(cwd)
+      .catch((cause: unknown) => {
+        if (!isCwdOutsideWorkspace(cause) || !environmentCwd || environmentCwd === cwd) {
+          throw cause;
+        }
+        return fetchAt(environmentCwd);
+      })
+      .then(
+        (result) => {
+          if (cancelled) return;
+          setOverlay(result);
+          setDrillStep(null);
+        },
+        (cause: unknown) => {
+          if (!cancelled) setError(String(cause));
+        },
+      );
     return () => {
       cancelled = true;
     };
-  }, [cwd, diffIgnoreWhitespace]);
+  }, [cwd, diffIgnoreWhitespace, environmentCwd]);
 
   // ------------------------------------------------------- the turn's diff
   //
@@ -480,6 +508,19 @@ export default function DiffSurface({
         ) : null}
       </div>
     </TooltipProvider>
+  );
+}
+
+/**
+ * The endpoint answers a cwd it may not read the same as one that is not
+ * there, deliberately, so this is the tag to match rather than a message.
+ */
+function isCwdOutsideWorkspace(cause: unknown): boolean {
+  return (
+    typeof cause === "object" &&
+    cause !== null &&
+    (cause as { _tag?: unknown })._tag === "EnvironmentResourceNotFoundError" &&
+    (cause as { reason?: unknown }).reason === "cwd_not_found"
   );
 }
 
