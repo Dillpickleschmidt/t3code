@@ -5713,9 +5713,6 @@ function ChatViewContent(props: ChatViewProps) {
       </Suspense>
     ) : activeRightPanelSurface?.kind === "diff3d" && diff3dCwd ? (
       <Suspense fallback={null}>
-        {/* Keyed by cwd, so it does not remount on a thread switch — the ref
-            is a prop it reads reactively rather than a key. Two of its four
-            scopes are the thread's. */}
         <DiffSurface key={diff3dCwd} cwd={diff3dCwd} threadRef={activeThreadRef} />
       </Suspense>
     ) : activeRightPanelSurface?.kind === "plan" ? (

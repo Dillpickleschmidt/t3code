@@ -784,13 +784,11 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           cwd,
           baseRef: initialBranch,
           ignoreWhitespace: false,
-          includeFileStats: true,
         });
         const ignored = yield* driver.getReviewDiffPreview({
           cwd,
           baseRef: initialBranch,
           ignoreWhitespace: true,
-          includeFileStats: true,
         });
 
         assert.isNotEmpty(included.sources.find((source) => source.kind === "working-tree")?.diff);
@@ -803,26 +801,16 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           ignored.sources.find((source) => source.kind === "branch-range")?.diff,
           "",
         );
-
-        // The counts answer the same setting as the patch beside them. A
-        // source whose diff is empty and whose stat is not would be one
-        // response disagreeing with itself.
-        assert.isNotEmpty(included.sources.find((source) => source.kind === "branch-range")?.files);
-        assert.deepEqual(
-          ignored.sources.find((source) => source.kind === "branch-range")?.files,
-          [],
-        );
       }),
     );
 
-    // Every consumer of a source quotes its `files` — the 2D panel's header and
-    // 3D Diff's terrain both — so the counts have to be the diff's own. They
-    // are a separate git call from the patch, and the flags that decide what
-    // git counts have to be on both: `--minimal` alone once put 385/61 on one
-    // panel against 384/60 on the other for the same file.
-    // The counts are opt-in because they are extra git calls on a path that
-    // opens with the diff panel — one per source plus one per untracked file.
-    // The panel does not use them, so it must not pay for them.
+    // `includeFileStats` is fork-added (3D Diff places every changed file, so
+    // it needs whole-range counts the capped patch cannot give). Two things to
+    // hold: the default path pays nothing — the counts are extra git calls on
+    // a path that opens with the diff panel — and when asked, the counts obey
+    // the same flags as the patch beside them, `ignoreWhitespace` included:
+    // one `--minimal` between two spellings once put 385/61 on one panel
+    // against 384/60 on the other for the same file.
     it.effect("computes no file stats unless the caller asks", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
@@ -852,9 +840,9 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
         yield* git(cwd, ["checkout", "-b", "stats"]);
         yield* writeTextFile(cwd, "added.txt", "one\ntwo\nthree\n");
-        yield* writeTextFile(cwd, "README.md", "# test\nplus a line\n");
+        yield* writeTextFile(cwd, "README.md", "#  test\n");
         yield* git(cwd, ["add", "-A"]);
-        yield* git(cwd, ["commit", "-m", "add and edit"]);
+        yield* git(cwd, ["commit", "-m", "add a file, reindent another"]);
         yield* writeTextFile(cwd, "untracked.txt", "u1\nu2\n");
 
         const preview = yield* driver.getReviewDiffPreview({
@@ -871,7 +859,21 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           [...(branch?.files ?? [])]
             .map((file) => `${file.path} +${file.additions} -${file.deletions}`)
             .sort(),
-          ["README.md +1 -0", "added.txt +3 -0"],
+          ["README.md +1 -1", "added.txt +3 -0"],
+        );
+        // and it answers the caller's whitespace setting like the patch does:
+        // README's change is whitespace-only, so ignoring whitespace drops it
+        const ignored = yield* driver.getReviewDiffPreview({
+          cwd,
+          baseRef: initialBranch,
+          ignoreWhitespace: true,
+          includeFileStats: true,
+        });
+        assert.deepEqual(
+          ignored.sources
+            .find((source) => source.kind === "branch-range")
+            ?.files.map((file) => file.path),
+          ["added.txt"],
         );
         // and an untracked file reaches the working-tree source's stat, which
         // is a separate `--no-index` call from the tracked one

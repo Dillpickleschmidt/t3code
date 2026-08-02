@@ -122,7 +122,7 @@ describe("DiffOverlayService", () => {
         return yield* service.getOverlay({ cwd: root, ignoreWhitespace: false });
       }).pipe(Effect.provide(layerFor(root)));
 
-      const commits = overlay.steps.filter((step) => step.kind === "commit");
+      const commits = overlay.steps;
       assert.deepEqual(
         commits.map((step) => step.title),
         ["first", "main work", "merge side", "drop gone", "changed nothing", "", "add a binary"],
@@ -255,7 +255,7 @@ describe("DiffOverlayService", () => {
         "a.txt",
       );
       assert.deepEqual(
-        overlay.steps.filter((step) => step.kind === "commit").map((step) => step.title),
+        overlay.steps.map((step) => step.title),
         ["first", "main work", "merge side", "drop gone", "changed nothing", "", "add a binary"],
       );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -324,28 +324,6 @@ describe("DiffOverlayService", () => {
       }).pipe(Effect.provide(layerFor(workspace)));
 
       assert.strictEqual(error._tag, "DiffOverlayOutsideWorkspaceError");
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
-  // The overlay no longer computes what the working tree changed, so its
-  // steps are commits and nothing else. The working-tree scope reads the
-  // review preview's own source, like the 2D panel does.
-  it.effect("steps commits only, leaving the working tree to the review preview", () =>
-    Effect.gen(function* () {
-      const root = yield* makeRepo();
-      const overlay = yield* Effect.gen(function* () {
-        const service = yield* DiffOverlay.DiffOverlayService;
-        return yield* service.getOverlay({ cwd: root, ignoreWhitespace: false });
-      }).pipe(Effect.provide(layerFor(root)));
-
-      assert.deepEqual(
-        [...new Set(overlay.steps.map((step) => step.kind))],
-        ["commit"],
-        "no working-tree step rides along any more",
-      );
-      // `makeRepo` leaves staged, unstaged and untracked changes behind, so a
-      // surviving working-tree step would be visible here.
-      assert.isUndefined(overlay.steps.find((step) => step.title === "Uncommitted changes"));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

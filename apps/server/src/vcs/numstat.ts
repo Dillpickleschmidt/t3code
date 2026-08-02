@@ -64,7 +64,7 @@ export function parseNumstat(stdout: string): Array<NumstatFile> {
   return files;
 }
 
-export function parseCount(value: string): number {
+function parseCount(value: string): number {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }

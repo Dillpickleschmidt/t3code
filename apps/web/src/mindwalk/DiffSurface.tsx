@@ -1,4 +1,4 @@
-import type { DiffOverlay, DiffOverlayStep, ScopedThreadRef } from "@t3tools/contracts";
+import type { DiffOverlay, ScopedThreadRef } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -226,10 +226,7 @@ export default function DiffSurface({
   }, [turnDiff.data?.diff]);
 
   // ------------------------------------------------------------ the frame
-  const commitSteps = useMemo(
-    () => (overlay?.steps ?? []).filter((step) => step.kind === "commit"),
-    [overlay],
-  );
+  const commitSteps = overlay?.steps ?? [];
   const workingSource = selectSource(reviewPreview.sources, "unstaged");
   const branchSource = selectSource(reviewPreview.sources, "branch");
 
@@ -623,7 +620,7 @@ function rangeLabel(overlay: DiffOverlay): string {
     case "branch-range":
       return `${overlay.range.baseRef ?? "base"} → ${head}`;
     case "recent-commits":
-      return `last ${overlay.steps.filter((step: DiffOverlayStep) => step.kind === "commit").length} commits`;
+      return `last ${overlay.steps.length} commits`;
     case "working-tree":
       return "working tree";
   }
