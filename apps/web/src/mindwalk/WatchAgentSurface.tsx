@@ -168,6 +168,13 @@ export default function WatchAgentSurface({ threadId }: { threadId: ThreadId }) 
     else setOpenSheet((open) => (open === panel.id ? null : panel.id));
   }, []);
 
+  // Closing the inspector clears the selection with it: they are one idea, and
+  // the scenes key their pan-and-restore off the selection, so leaving it set
+  // would strand the camera where the inspector pushed it.
+  useEffect(() => {
+    if (openSheet !== "inspect") setSelectedPath(undefined);
+  }, [openSheet]);
+
   const closePop = useCallback(() => setOpenPop(null), []);
   const closeSheet = useCallback(() => setOpenSheet(null), []);
 
