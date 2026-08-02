@@ -313,6 +313,22 @@ const STRUCTURE_MIX = {
 } as const;
 
 /**
+ * Light mode needs a longer step to read as the same separation.
+ *
+ * `color-mix(in oklab, …)` is perceptually uniform, so N% is the same
+ * perceptual distance in either direction — but the *ground it lands on* is
+ * not symmetric. Against black, 39% toward white is legible mid-grey; against
+ * white, 39% toward black is faint. On the terrain that barely shows, because
+ * the touch colours carry the image. On the tree, where the structure is the
+ * content, it is the difference between reading the shape and squinting.
+ *
+ * One multiplier rather than a second table, so the ordering below stays the
+ * single source of truth: ghost dimmer than unvisited, a lit branch brighter
+ * than one at rest, in both themes.
+ */
+const LIGHT_MIX_GAIN = 1.4;
+
+/**
  * The scene palette with every neutral resolved against the live theme.
  *
  * A WebGL canvas cannot inherit `bg-background` and `text-muted-foreground`
@@ -332,7 +348,7 @@ const STRUCTURE_MIX = {
  */
 export function resolveScenePalette(host: HTMLElement, theme: MindwalkTheme): ScenePalette {
   const fallback = paletteFor(theme).scene;
-  const context = document.createElement("canvas").getContext("2d");
+  const context = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
   if (!context) return fallback;
 
   const probe = document.createElement("div");
@@ -352,14 +368,26 @@ export function resolveScenePalette(host: HTMLElement, theme: MindwalkTheme): Sc
       const sentinel = "#010203";
       context.fillStyle = sentinel;
       context.fillStyle = computed;
-      const resolved = context.fillStyle;
-      if (typeof resolved !== "string" || resolved === sentinel) return undefined;
-      // translucent colours serialize as rgba(); the stage is opaque, and a
-      // see-through sky would not be a usable fog target anyway
-      return resolved.startsWith("#") ? resolved : undefined;
+      if (context.fillStyle === sentinel) return undefined;
+      // Canvas serializes a colour in the space it was authored in, so T3's
+      // oklch tokens come back as `oklab(...)` — which THREE.Color cannot
+      // parse, and which an earlier `startsWith("#")` guard silently rejected,
+      // falling the whole scene back to the static palette. Rasterizing one
+      // pixel and reading the bytes converts to sRGB for us, whatever syntax
+      // the token was written in.
+      context.clearRect(0, 0, 1, 1);
+      context.fillRect(0, 0, 1, 1);
+      const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data;
+      // the stage is opaque; a see-through sky is not a usable fog target
+      if (alpha !== 255) return undefined;
+      const hex = (channel: number | undefined) => (channel ?? 0).toString(16).padStart(2, "0");
+      return `#${hex(red)}${hex(green)}${hex(blue)}`;
     };
+    const gain = theme === "light" ? LIGHT_MIX_GAIN : 1;
     const mix = (percent: number) =>
-      read(`color-mix(in oklab, var(--foreground) ${percent}%, var(--background))`);
+      read(
+        `color-mix(in oklab, var(--foreground) ${Math.min(percent * gain, 100)}%, var(--background))`,
+      );
 
     const sky = read("var(--background)");
     const labelInk = read("var(--muted-foreground)");
