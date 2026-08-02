@@ -85,26 +85,32 @@ export default function DiffSurface({ cwd }: { cwd: string }) {
   const steps = overlay?.steps ?? [];
   const step = Math.min(stepIndex, Math.max(0, steps.length - 1));
 
-  // The frame at position i is the sum of steps 1..i: each step carries only
-  // its own change, and summing them is churn rather than a net diff — a line
-  // added and later removed counts twice, which is what the surface is asking.
+  // One step, one commit — steps do not accumulate. This is the same reading
+  // as every diff view in T3 and in an ordinary git client: "what did this
+  // commit change", not "what has changed so far". Scrubbing walks the branch
+  // commit by commit rather than watching a pile grow.
   const churnByPath = useMemo(() => {
     const totals = new Map<string, FileChurn>();
-    for (let i = 0; i <= step && i < steps.length; i++) {
-      for (const file of steps[i]!.files) {
-        const previous = totals.get(file.path);
-        totals.set(file.path, {
-          additions: (previous?.additions ?? 0) + file.additions,
-          deletions: (previous?.deletions ?? 0) + file.deletions,
-        });
-      }
+    for (const file of steps[step]?.files ?? []) {
+      totals.set(file.path, { additions: file.additions, deletions: file.deletions });
     }
     return totals;
   }, [steps, step]);
 
+  // The scale is the whole range's tallest column, not this step's, so height
+  // stays comparable as you scrub: a quiet commit reads as quiet instead of
+  // being stretched to fill the frame.
+  const fullHeightChurn = useMemo(() => {
+    let peak = 0;
+    for (const entry of steps) {
+      for (const file of entry.files) peak = Math.max(peak, file.additions + file.deletions);
+    }
+    return peak;
+  }, [steps]);
+
   const columns = useMemo(
-    () => (city ? diffColumns(city, churnByPath, scenePalette) : []),
-    [city, churnByPath, scenePalette],
+    () => (city ? diffColumns(city, churnByPath, fullHeightChurn, scenePalette) : []),
+    [city, churnByPath, fullHeightChurn, scenePalette],
   );
 
   const totals = useMemo(() => {
@@ -155,10 +161,14 @@ export default function DiffSurface({ cwd }: { cwd: string }) {
               />
               <div className="pointer-events-none absolute inset-0 p-5 @max-[900px]:px-4 @max-[900px]:py-3.5">
                 <div className="pointer-events-auto min-w-0">
+                  {/* The step's own title, because the terrain is one commit
+                      rather than a running total — without it there is nothing
+                      on screen saying which commit you are standing in. */}
                   <div className="truncate font-semibold text-foreground text-xl tracking-tight @max-[900px]:text-lg">
-                    {basename(city.repo.root)}
+                    {steps[step]?.title || basename(city.repo.root)}
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-muted-foreground">
+                    <span>{basename(city.repo.root)}</span>
                     <span>{rangeLabel(overlay)}</span>
                     <span>
                       {totals.files} file{totals.files === 1 ? "" : "s"}

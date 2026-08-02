@@ -112,8 +112,11 @@ export function CommitScrubber({
               return (
                 <span
                   key={bar.id}
+                  // the step you are on, not the ground you have covered:
+                  // each bar is its own commit, so filling up to the cursor
+                  // would read as a total that is accumulating
                   className={`flex min-w-0 flex-1 flex-col overflow-hidden rounded-t-[1px] ${
-                    index <= step ? "opacity-90" : "opacity-30"
+                    index === step ? "opacity-100" : "opacity-30"
                   }`}
                   style={{ height: `${height}%` }}
                 >
