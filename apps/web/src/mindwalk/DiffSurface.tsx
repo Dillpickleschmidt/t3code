@@ -1,10 +1,4 @@
-import type {
-  DiffOverlay,
-  DiffOverlayFile,
-  DiffOverlayStep,
-  ScopedThreadRef,
-} from "@t3tools/contracts";
-import { useAtomValue } from "@effect/atom-react";
+import type { DiffOverlay, DiffOverlayStep, ScopedThreadRef } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -25,8 +19,8 @@ import { resolveDiffScope } from "../diffScope";
 import { useCheckpointDiff } from "../lib/checkpointDiffState";
 import { getRenderablePatch, resolveFileDiffPath } from "../lib/diffRendering";
 import { useClientSettings } from "../hooks/useSettings";
+import { selectSource, useReviewDiffPreview } from "../hooks/useReviewDiffPreview";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
-import { serverEnvironment } from "../state/server";
 import { useThread } from "../state/entities";
 import { formatShortTimestamp } from "../timestampFormat";
 import { PrimaryEnvironmentHttpClient } from "../environments/primary/httpClient";
@@ -114,12 +108,15 @@ export default function DiffSurface({
     );
   }, [selection, orderedTurnDiffSummaries, threadRef]);
 
-  // The environment's own working directory, which is what the server bounds
-  // diff requests to. Only read for the retry below.
-  const serverConfig = useAtomValue(
-    serverEnvironment.configValueAtom(threadRef?.environmentId ?? null),
-  );
-  const environmentCwd = serverConfig?.cwd;
+  // The two repository scopes are this query, not a second opinion about it.
+  // Same hook the 2D panel calls, same refs, same whitespace, same
+  // workspace-boundary retry — so "Branch changes" cannot mean one thing here
+  // and another over there, and neither can the numbers under it.
+  const reviewPreview = useReviewDiffPreview(threadRef, cwd, {
+    ignoreWhitespace: diffIgnoreWhitespace,
+    enabled: scope.kind !== "turn",
+  });
+  const environmentCwd = reviewPreview.cwd;
 
   const [overlay, setOverlay] = useState<DiffOverlay | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -229,10 +226,8 @@ export default function DiffSurface({
     () => (overlay?.steps ?? []).filter((step) => step.kind === "commit"),
     [overlay],
   );
-  const workingStep = useMemo(
-    () => (overlay?.steps ?? []).find((step) => step.kind === "working-tree"),
-    [overlay],
-  );
+  const workingSource = selectSource(reviewPreview.sources, "unstaged");
+  const branchSource = selectSource(reviewPreview.sources, "branch");
 
   // Scope changes clear the stage's own state. A column selected in one scope
   // is usually not even present in the next, and a drill-down position means
@@ -247,8 +242,10 @@ export default function DiffSurface({
   const frame = useMemo((): Frame => {
     switch (scope.kind) {
       case "unstaged":
-        return workingStep
-          ? frameOf(workingStep.title, workingStep.files, [workingStep.files])
+        if (reviewPreview.error)
+          return emptyFrame("Working tree", `Could not load this diff: ${reviewPreview.error}`);
+        return workingSource && workingSource.files.length > 0
+          ? frameOf("Uncommitted changes", workingSource.files, [workingSource.files])
           : emptyFrame("Uncommitted changes", "The working tree is clean.");
       case "turn": {
         if (!threadRef) return emptyFrame("Turn", "Open a thread to see its turns.");
@@ -259,24 +256,30 @@ export default function DiffSurface({
         return frameOf(scope.label, turnChurn, [turnChurn]);
       }
       default: {
-        // Branch changes: the netted range, drilled into one commit at a time.
-        // Framing height comes from the range *and* the aggregate together, so
-        // the camera does not rescale as you step in and out of it.
-        const spans = [...commitSteps.map((step) => step.files), overlay?.aggregate ?? []];
+        // Branch changes: the review preview's own branch source, drilled into
+        // one commit at a time. Framing height spans the range and the whole
+        // frame together, so the camera does not rescale as you step in and out.
+        const spans = [...commitSteps.map((step) => step.files), branchSource?.files ?? []];
         if (drillStep !== null) {
           const step = commitSteps[Math.min(drillStep, commitSteps.length - 1)];
           return step
             ? frameOf(step.title, step.files, spans)
             : emptyFrame("Branch changes", "Nothing has changed in this range.");
         }
-        if (!overlay) return emptyFrame("Branch changes");
-        return overlay.aggregate && overlay.aggregate.length > 0
-          ? frameOf(rangeLabel(overlay), overlay.aggregate, spans)
+        if (reviewPreview.error)
+          return emptyFrame("Branch changes", `Could not load this diff: ${reviewPreview.error}`);
+        if (!branchSource) return emptyFrame("Branch changes");
+        return branchSource.files.length > 0
+          ? frameOf(
+              overlay ? rangeLabel(overlay) : (branchSource.baseRef ?? "Branch changes"),
+              branchSource.files,
+              spans,
+            )
           : emptyFrame(
               "Branch changes",
-              overlay.aggregate === null
-                ? "This branch has no base to compare against yet."
-                : "Nothing has changed in this range.",
+              branchSource.baseRef
+                ? "Nothing has changed in this range."
+                : "This branch has no base to compare against yet.",
             );
       }
     }
@@ -285,7 +288,9 @@ export default function DiffSurface({
     scope.label,
     scope.turn,
     threadRef,
-    workingStep,
+    workingSource,
+    branchSource,
+    reviewPreview.error,
     turnChurn,
     turnDiff.error,
     commitSteps,
@@ -538,13 +543,20 @@ interface Frame {
   readonly notice?: string;
 }
 
+/** What every source of a frame agrees to look like: a path and two counts. */
+interface FileLineCount {
+  readonly path: string;
+  readonly additions: number;
+  readonly deletions: number;
+}
+
 /** A frame's files, however the scope that produced them happened to hold them. */
-type ChurnSpan = ReadonlyArray<DiffOverlayFile> | ReadonlyMap<string, FileChurn>;
+type ChurnSpan = ReadonlyArray<FileLineCount> | ReadonlyMap<string, FileChurn>;
 
 function churnMapOf(files: ChurnSpan): ReadonlyMap<string, FileChurn> {
   if (files instanceof Map) return files;
   return new Map(
-    (files as ReadonlyArray<DiffOverlayFile>).map((file) => [
+    (files as ReadonlyArray<FileLineCount>).map((file) => [
       file.path,
       { additions: file.additions, deletions: file.deletions },
     ]),

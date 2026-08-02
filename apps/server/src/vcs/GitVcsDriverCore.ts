@@ -30,6 +30,7 @@ import { compactTraceAttributes } from "@t3tools/shared/observability";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
+import { parseNumstat } from "./numstat.ts";
 import {
   parseRemoteNames,
   parseRemoteNamesInGitOrder,
@@ -45,6 +46,12 @@ const RANGE_COMMIT_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
 const REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES = 120_000;
+/**
+ * A numstat row is ~30 bytes, so this covers tens of thousands of changed
+ * files — far past the patch cap, which is the point: the counts are meant to
+ * stay complete where the patch is cut off.
+ */
+const REVIEW_DIFF_STAT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const REVIEW_UNTRACKED_DIFF_MAX_OUTPUT_BYTES = 80_000;
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 120_000;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
@@ -2086,6 +2093,97 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
   });
 
+  /**
+   * The line counts for a review diff, run with the flags its patch is run
+   * with. Every flag that changes what git *counts* has to be on both — the
+   * two are one diff in two output formats, and a flag on one alone is a
+   * disagreement served inside a single response. `--minimal` is the one that
+   * bites: it spends extra work finding a smaller diff and on a rewritten file
+   * genuinely lands on a different one. `--patch`/`--no-color` have no numstat
+   * equivalent, and `--no-renames` is deliberately absent from both.
+   */
+  const readReviewDiffStat = Effect.fn("readReviewDiffStat")(function* (
+    cwd: string,
+    revisions: ReadonlyArray<string>,
+    ignoreWhitespace: boolean | undefined,
+  ) {
+    const result = yield* executeGit(
+      "GitVcsDriver.getReviewDiffPreview.stat",
+      cwd,
+      [
+        "diff",
+        "--numstat",
+        "-z",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--minimal",
+        ...(ignoreWhitespace ? ["--ignore-all-space"] : []),
+        ...revisions,
+        "--",
+      ],
+      { maxOutputBytes: REVIEW_DIFF_STAT_MAX_OUTPUT_BYTES },
+    ).pipe(
+      Effect.orElseSucceed(() => ({
+        exitCode: 1,
+        stdout: "",
+        stderr: "",
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      })),
+    );
+    return result.exitCode === 0 ? parseNumstat(result.stdout) : [];
+  });
+
+  /** Untracked files, counted the way `readUntrackedReviewDiffs` diffs them. */
+  const readUntrackedReviewDiffStat = Effect.fn("readUntrackedReviewDiffStat")(function* (
+    cwd: string,
+  ) {
+    const untrackedResult = yield* executeGit(
+      "GitVcsDriver.getReviewDiffPreview.untrackedStatList",
+      cwd,
+      ["ls-files", "--others", "--exclude-standard", "-z"],
+      { maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES },
+    ).pipe(
+      Effect.orElseSucceed(() => ({
+        exitCode: 1,
+        stdout: "",
+        stderr: "",
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      })),
+    );
+    const paths =
+      untrackedResult.exitCode === 0 ? splitNullSeparatedGitStdoutPaths(untrackedResult) : [];
+    if (paths.length === 0) return [];
+    // `--no-index` exits 1 whenever the files differ, which is every time.
+    const stats = yield* Effect.forEach(
+      paths,
+      (relativePath) =>
+        executeGit(
+          "GitVcsDriver.getReviewDiffPreview.untrackedStat",
+          cwd,
+          [
+            "diff",
+            "--numstat",
+            "-z",
+            "--no-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--minimal",
+            "--",
+            "/dev/null",
+            relativePath,
+          ],
+          { allowNonZeroExit: true, maxOutputBytes: REVIEW_DIFF_STAT_MAX_OUTPUT_BYTES },
+        ).pipe(
+          Effect.map((result) => parseNumstat(result.stdout)),
+          Effect.orElseSucceed(() => []),
+        ),
+      { concurrency: 4 },
+    );
+    return stats.flat();
+  });
+
   const readUntrackedReviewDiffs = Effect.fn("readUntrackedReviewDiffs")(function* (cwd: string) {
     const untrackedResult = yield* executeGit(
       "GitVcsDriver.readUntrackedReviewDiffs.list",
@@ -2187,6 +2285,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const dirtyUntracked = yield* readUntrackedReviewDiffs(input.cwd).pipe(
       Effect.orElseSucceed(() => ({ diff: "", truncated: false })),
     );
+    // The same diffs again as counts. Not parsed out of the patches above,
+    // because those are capped: past the cap a tally of their hunks is short,
+    // and every consumer doing its own tallying is short by its own amount.
+    // `--numstat` carries no content, so it stays right where the patch stops.
+    const dirtyStat = yield* readReviewDiffStat(input.cwd, ["HEAD"], input.ignoreWhitespace);
+    const untrackedStat = yield* readUntrackedReviewDiffStat(input.cwd);
     const dirtyDiff = [dirtyTrackedResult.stdout.trimEnd(), dirtyUntracked.diff.trimEnd()]
       .filter((diff) => diff.length > 0)
       .join("\n");
@@ -2221,6 +2325,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           )
         : null;
     const baseDiff = baseResult?.stdout ?? "";
+    const baseStat =
+      baseRef && branch
+        ? yield* readReviewDiffStat(input.cwd, [`${baseRef}...HEAD`], input.ignoreWhitespace)
+        : [];
     const hashDiff = (diff: string) =>
       crypto.digest("SHA-256", new TextEncoder().encode(diff)).pipe(
         Effect.map(Encoding.encodeHex),
@@ -2250,6 +2358,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         diff: dirtyDiff,
         diffHash: dirtyDiffHash,
         truncated: dirtyTrackedResult.stdoutTruncated || dirtyUntracked.truncated,
+        files: [...dirtyStat, ...untrackedStat],
       },
       {
         id: "branch-range",
@@ -2260,6 +2369,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         diff: baseDiff,
         diffHash: baseDiffHash,
         truncated: baseResult?.stdoutTruncated ?? false,
+        files: baseStat,
       },
     ];
 

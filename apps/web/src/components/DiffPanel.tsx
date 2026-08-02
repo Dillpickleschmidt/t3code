@@ -37,6 +37,7 @@ import {
   resolveFileDiffPath,
 } from "../lib/diffRendering";
 import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollapse";
+import { selectSource, useReviewDiffPreview } from "../hooks/useReviewDiffPreview";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useProject, useThread } from "../state/entities";
 import { resolveThreadRouteRef } from "../threadRoutes";
@@ -69,7 +70,6 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
-import { reviewEnvironment } from "../state/review";
 import { vcsEnvironment } from "../state/vcs";
 import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices";
 
@@ -309,50 +309,23 @@ export default function DiffPanel({
     },
     { enabled: isGitRepo && selectedTurn !== undefined },
   );
-  const primaryBranchDiffPreview = useEnvironmentQuery(
-    selectedTurnId === null && activeThread && activeCwd
-      ? reviewEnvironment.diffPreview({
-          environmentId: activeThread.environmentId,
-          input: {
-            cwd: activeCwd,
-            ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
-            ignoreWhitespace: diffIgnoreWhitespace,
-          },
-        })
-      : null,
-  );
-  const shouldRetryBranchDiffAtEnvironmentCwd =
-    selectedTurnId === null &&
-    primaryBranchDiffPreview.error?.includes("configured workspace root") === true &&
-    serverConfig?.cwd !== undefined &&
-    serverConfig.cwd !== activeCwd;
-  const fallbackBranchDiffPreview = useEnvironmentQuery(
-    shouldRetryBranchDiffAtEnvironmentCwd && activeThread && serverConfig
-      ? reviewEnvironment.diffPreview({
-          environmentId: activeThread.environmentId,
-          input: {
-            cwd: serverConfig.cwd,
-            ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
-            ignoreWhitespace: diffIgnoreWhitespace,
-          },
-        })
-      : null,
-  );
-  const branchDiffPreview = shouldRetryBranchDiffAtEnvironmentCwd
-    ? fallbackBranchDiffPreview
-    : primaryBranchDiffPreview;
-  const selectedGitSource = branchDiffPreview.data?.sources.find(
-    (source) => source.kind === (selectedGitScope === "unstaged" ? "working-tree" : "branch-range"),
-  );
+  // The boundary retry lives in `useReviewDiffPreview` now, so 3D Diff gets it
+  // too instead of dying where this panel quietly recovers.
+  const branchDiffPreview = useReviewDiffPreview(routeThreadRef, activeCwd, {
+    baseRef: selectedBaseRef,
+    ignoreWhitespace: diffIgnoreWhitespace,
+    enabled: selectedTurnId === null,
+  });
+  const selectedGitSource = selectSource(branchDiffPreview.sources, selectedGitScope);
   const localBranchRefs = useEnvironmentQuery(
     selectedTurnId === null &&
       selectedGitScope === "branch" &&
       activeThread &&
-      branchDiffPreview.data?.cwd
+      branchDiffPreview.cwd
       ? vcsEnvironment.listRefs({
           environmentId: activeThread.environmentId,
           input: {
-            cwd: branchDiffPreview.data.cwd,
+            cwd: branchDiffPreview.cwd,
             includeMatchingRemoteRefs: true,
             refKind: "local",
             ...(baseRefQuery.trim().length > 0 ? { query: baseRefQuery.trim() } : {}),
@@ -365,11 +338,11 @@ export default function DiffPanel({
     selectedTurnId === null &&
       selectedGitScope === "branch" &&
       activeThread &&
-      branchDiffPreview.data?.cwd
+      branchDiffPreview.cwd
       ? vcsEnvironment.listRefs({
           environmentId: activeThread.environmentId,
           input: {
-            cwd: branchDiffPreview.data.cwd,
+            cwd: branchDiffPreview.cwd,
             includeMatchingRemoteRefs: true,
             refKind: "remote",
             ...(baseRefQuery.trim().length > 0 ? { query: baseRefQuery.trim() } : {}),
@@ -435,7 +408,25 @@ export default function DiffPanel({
   );
   const diffFileKeys = useMemo(() => codeViewFiles.map((file) => file.fileKey), [codeViewFiles]);
   const allDiffFilesCollapsed = areAllDiffFilesCollapsed(diffFileKeys, collapsedDiffFileKeys);
-  const diffLineStat = useMemo(() => getDiffLineStat(renderableFiles), [renderableFiles]);
+  // For a git scope the counts are the server's, because the patch this panel
+  // renders is capped: past the cap, tallying its hunks reports fewer lines
+  // than the range really changed. `--numstat` has no content to truncate, so
+  // it stays right — and 3D Diff quotes the very same figures. Turn diffs have
+  // no served stat yet, so they still count what they render.
+  const servedStat = selectedTurnId === null ? selectedGitSource?.files : undefined;
+  const diffLineStat = useMemo(
+    () =>
+      servedStat
+        ? servedStat.reduce(
+            (total, file) => ({
+              additions: total.additions + file.additions,
+              deletions: total.deletions + file.deletions,
+            }),
+            { additions: 0, deletions: 0 },
+          )
+        : getDiffLineStat(renderableFiles),
+    [servedStat, renderableFiles],
+  );
 
   useEffect(() => {
     if (!selectedFilePath) return;

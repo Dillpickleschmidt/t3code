@@ -5304,6 +5304,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                     diff: "dirty-diff",
                     diffHash: "hash-dirty",
                     truncated: false,
+                    files: [],
                   },
                   {
                     id: "branch-range",
@@ -5314,6 +5315,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                     diff: "base-diff",
                     diffHash: "hash-base",
                     truncated: false,
+                    files: [],
                   },
                 ],
               }),

@@ -13,7 +13,8 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 
-import { ghostPathsOf, parseCommitLog, parseNumstat } from "./DiffOverlay.ts";
+import { parseNumstat } from "../vcs/numstat.ts";
+import { ghostPathsOf, parseCommitLog } from "./DiffOverlay.ts";
 
 const NUL = "\0";
 
@@ -141,6 +142,23 @@ describe("ghostPathsOf", () => {
       "a.txt",
       "b.txt",
       "c.txt",
+    ]);
+  });
+
+  // A file deleted but not committed is in no step, and gone from the tree the
+  // city is built from — so without this it has nowhere to draw at all.
+  it("includes uncommitted deletions, and still dedupes", () => {
+    const step = {
+      id: "a",
+      kind: "commit" as const,
+      title: "a",
+      committedAt: "2023-11-14T22:13:20.000Z",
+      files: [{ path: "kept.txt", additions: 1, deletions: 0 }],
+    };
+
+    assert.deepEqual(ghostPathsOf([step], ["dropped.txt", "kept.txt", ""]), [
+      "dropped.txt",
+      "kept.txt",
     ]);
   });
 });

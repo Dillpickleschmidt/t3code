@@ -264,9 +264,9 @@ export function CommitScrubber({
   );
 }
 
-/** The uncommitted step has no sha to show, and saying so is the point. */
+/** Every step is a commit now, so the short sha is always the right label. */
 function stepWord(step: DiffOverlayStep): string {
-  return step.kind === "working-tree" ? "working tree" : step.id.slice(0, 7);
+  return step.id.slice(0, 7);
 }
 
 /**

@@ -62,18 +62,6 @@ const parsePlainNumstat = (stdout: string) =>
       return { path: rest.join("\t"), additions: count(additions), deletions: count(deletions) };
     });
 
-/**
- * The new path out of `git diff --numstat` without `-z`, which prints a rename
- * as one path: `a.txt => b.txt`, or brace-compressed around a common part as
- * `src/{a.txt => b.txt}` and `{src => lib}/a.txt`.
- */
-const renameTarget = (path: string) => {
-  const braced = path.match(/^(.*)\{(.*) => (.*)\}(.*)$/);
-  if (braced) return `${braced[1]}${braced[3]}${braced[4]}`.replace(/\/{2,}/g, "/");
-  const arrow = path.split(" => ");
-  return arrow.length === 2 ? (arrow[1] ?? path) : path;
-};
-
 const byPath = <A extends { path: string }>(files: ReadonlyArray<A>) =>
   [...files].sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
 
@@ -176,25 +164,6 @@ describe("DiffOverlayService", () => {
       // A binary has no lines, so it gets a building and no height.
       assert.deepEqual(step("add a binary")?.files, [
         { path: "bin.dat", additions: 0, deletions: 0 },
-      ]);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
-  it.effect("ends on everything uncommitted: staged, unstaged and untracked", () =>
-    Effect.gen(function* () {
-      const root = yield* makeRepo();
-      const overlay = yield* Effect.gen(function* () {
-        const service = yield* DiffOverlay.DiffOverlayService;
-        return yield* service.getOverlay({ cwd: root, ignoreWhitespace: false });
-      }).pipe(Effect.provide(layerFor(root)));
-
-      const last = overlay.steps.at(-1);
-      assert.strictEqual(last?.kind, "working-tree");
-      assert.deepEqual(byPath(last?.files ?? []), [
-        // Both the staged line and the unstaged one, because the 2D panel's
-        // working-tree source diffs against HEAD rather than against the index.
-        { path: "a.txt", additions: 2, deletions: 0 },
-        { path: "untracked.txt", additions: 2, deletions: 0 },
       ]);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -326,13 +295,8 @@ describe("DiffOverlayService", () => {
       assert.isNotEmpty(filesOf(counted, "reindent"), "counted: the commit re-indents two lines");
       assert.deepEqual(filesOf(ignored, "reindent"), [], "ignored: nothing but whitespace moved");
 
-      // and the working-tree step too, which runs a different git command
-      const dirty = (overlay: typeof counted) =>
-        (overlay.steps.find((step) => step.kind === "working-tree")?.files ?? []).map(
-          (file) => file.path,
-        );
-      assert.include(dirty(counted), "ws.txt");
-      assert.notInclude(dirty(ignored), "ws.txt");
+      // The working tree's own answer to the same setting is the review
+      // preview's now, and `GitVcsDriverCore` carries the test for it.
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
@@ -363,213 +327,46 @@ describe("DiffOverlayService", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  // ------------------------------------------------------------- aggregate
-  //
-  // The Branch changes scope draws this rather than a sum of the steps, and
-  // the two genuinely differ: steps carry churn, the aggregate is net. Every
-  // test below is against a repository long enough that the recent-commits
-  // window starts *after* the root commit, since a window that reaches the
-  // root has no parent to net from — which is its own case, tested last.
-
-  /**
-   * Twenty-five commits, so the twenty-commit fallback window opens at commit
-   * six and has a parent. Inside that window: a file created and later
-   * deleted, a file changed and changed back, and a rename. All three are
-   * cases where "what the commits churned" and "what the range did" disagree.
-   */
-  const makeLongRepo = Effect.fn("makeLongRepo")(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-diff-overlay-long-" });
-    const write = (name: string, contents: string) =>
-      fileSystem.writeFileString(path.join(root, name), contents);
-    const run = (args: ReadonlyArray<string>) =>
-      git(root, args).pipe(Effect.provide(layerFor(root)));
-    const commit = (message: string) =>
-      run(["add", "-A"]).pipe(Effect.andThen(run(["commit", "-m", message])));
-
-    yield* run(["init", "-b", "main", "."]);
-    yield* run(["config", "user.email", "test@example.com"]);
-    yield* run(["config", "user.name", "Test"]);
-    yield* write("stable.txt", "one\ntwo\n");
-    yield* write("renamed-from.txt", "r1\nr2\nr3\n");
-    yield* commit("root");
-
-    // commits 2..20: filler, so the window's oldest step is well past the root
-    for (let index = 2; index <= 20; index += 1) {
-      yield* write("filler.txt", `${index}\n`);
-      yield* commit(`filler ${index}`);
-    }
-
-    // 21: a file appears…
-    yield* write("temp.txt", "t1\nt2\nt3\nt4\nt5\n");
-    yield* commit("add temp");
-    // 22: …stable.txt gains a line…
-    yield* write("stable.txt", "one\ntwo\nthree\n");
-    yield* commit("touch stable");
-    // 23: …and loses it again, so its net over the range is nothing
-    yield* write("stable.txt", "one\ntwo\n");
-    yield* commit("untouch stable");
-    // 24: the file from 21 goes, so its net over the range is nothing either
-    yield* run(["rm", "temp.txt"]);
-    yield* commit("drop temp");
-    // 25: a rename with no content change
-    yield* run(["mv", "renamed-from.txt", "renamed-to.txt"]);
-    yield* commit("rename");
-
-    return root;
-  });
-
-  const overlayAt = (root: string) =>
-    Effect.gen(function* () {
-      const service = yield* DiffOverlay.DiffOverlayService;
-      return yield* service.getOverlay({ cwd: root, ignoreWhitespace: false });
-    }).pipe(Effect.provide(layerFor(root)));
-
-  it.effect("nets the whole window, and agrees with a git diff spelled independently", () =>
-    Effect.gen(function* () {
-      const root = yield* makeLongRepo();
-      const overlay = yield* overlayAt(root);
-
-      const commits = overlay.steps.filter((step) => step.kind === "commit");
-      assert.strictEqual(commits.length, 20, "the fallback window is twenty commits");
-
-      // The same range, asked for as lines rather than through the `-z` field
-      // grammar the service parses, so a mistake there cannot agree with itself.
-      // The two spellings genuinely differ on one point: without `-z` git
-      // prints a rename as a single `old => new` path, where `-z` splits it
-      // into its own fields and the service reads the new one. Resolving that
-      // here keeps the reference independent rather than papering over it.
-      const expected = parsePlainNumstat(
-        yield* git(root, ["diff", "--numstat", "--minimal", `${commits[0]?.id}^`, "HEAD"]).pipe(
-          Effect.provide(layerFor(root)),
-        ),
-      ).map((file) => ({ ...file, path: renameTarget(file.path) }));
-      assert.deepEqual(byPath(overlay.aggregate ?? []), byPath(expected));
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
-  it.effect("is a net diff, not the churn of its steps", () =>
-    Effect.gen(function* () {
-      const root = yield* makeLongRepo();
-      const overlay = yield* overlayAt(root);
-      const aggregate = overlay.aggregate ?? [];
-      const churnOf = (path: string) =>
-        overlay.steps
-          .flatMap((step) => step.files)
-          .filter((file) => file.path === path)
-          .reduce((total, file) => total + file.additions + file.deletions, 0);
-
-      // Created and deleted inside the window: the steps churned ten lines
-      // over it, and the range did nothing at all.
-      assert.strictEqual(churnOf("temp.txt"), 10);
-      assert.isUndefined(aggregate.find((file) => file.path === "temp.txt"));
-
-      // Changed and changed back: churn again, net nothing.
-      assert.strictEqual(churnOf("stable.txt"), 2);
-      assert.isUndefined(aggregate.find((file) => file.path === "stable.txt"));
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
-  // The one place the aggregate deliberately asks git a *different* question
-  // from the steps. It is read against the 2D panel's numbers, and that panel
-  // leaves rename detection on, so this does too — while the steps run
-  // `--no-renames` so a rename reads as one building emptying and another
-  // filling, which is the right answer on a city and the wrong one here.
-  it.effect("detects renames, where the steps deliberately do not", () =>
-    Effect.gen(function* () {
-      const root = yield* makeLongRepo();
-      const overlay = yield* overlayAt(root);
-
-      const renameStep = overlay.steps.find((step) => step.title === "rename");
-      assert.deepEqual(
-        byPath(renameStep?.files ?? []).map((file) => file.path),
-        ["renamed-from.txt", "renamed-to.txt"],
-        "the step splits a rename in two",
-      );
-
-      const aggregatePaths = (overlay.aggregate ?? []).map((file) => file.path);
-      assert.include(aggregatePaths, "renamed-to.txt", "the aggregate reports the new path");
-      assert.notInclude(aggregatePaths, "renamed-from.txt");
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
-  // `--minimal` is not cosmetic: it spends extra work looking for a smaller
-  // diff and on a rewritten file lands on a different one, so a scope that
-  // omitted it would report different numbers from the 2D entry of the same
-  // name. Found by comparing the two on this repo, where the gap was a line.
-  // Pinned against the panel's own flags rather than against a number.
-  it("asks git the 2D panel's exact question, --minimal included", () =>
-    Effect.gen(function* () {
-      const root = yield* makeLongRepo();
-      const path = yield* Path.Path;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const run = (args: ReadonlyArray<string>) =>
-        git(root, args).pipe(Effect.provide(layerFor(root)));
-
-      // A wholesale rewrite, which is where the minimal-diff search diverges
-      // from the default one.
-      yield* fileSystem.writeFileString(
-        path.join(root, "rewritten.txt"),
-        Array.from({ length: 40 }, (_, index) => `original ${index}`).join("\n"),
-      );
-      yield* run(["add", "-A"]);
-      yield* run(["commit", "-m", "add rewritten"]);
-      yield* fileSystem.writeFileString(
-        path.join(root, "rewritten.txt"),
-        Array.from({ length: 40 }, (_, index) =>
-          index % 3 === 0 ? `replaced ${index}` : `original ${index}`,
-        ).join("\n"),
-      );
-      yield* run(["add", "-A"]);
-      yield* run(["commit", "-m", "rewrite it"]);
-
-      const overlay = yield* overlayAt(root);
-      const commits = overlay.steps.filter((step) => step.kind === "commit");
-
-      // The flags `GitVcsDriverCore.getReviewDiffPreview` passes, spelled here
-      // so this test fails if the aggregate's set ever drifts from the panel's.
-      const expected = parsePlainNumstat(
-        yield* git(root, [
-          "diff",
-          "--numstat",
-          "--minimal",
-          "--no-ext-diff",
-          "--no-textconv",
-          `${commits[0]?.id}^`,
-          "HEAD",
-        ]).pipe(Effect.provide(layerFor(root))),
-      ).map((file) => ({ ...file, path: renameTarget(file.path) }));
-
-      assert.deepEqual(byPath(overlay.aggregate ?? []), byPath(expected));
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)));
-
-  // Both frames' paths have to reach the citymap, and after the test above
-  // they are not the same set.
-  it.effect("gives every file the aggregate names a building to stand on", () =>
-    Effect.gen(function* () {
-      const root = yield* makeLongRepo();
-      const overlay = yield* overlayAt(root);
-
-      const inMap = new Set(overlay.citymap.files.map((file) => file.path));
-      assert.deepEqual(
-        (overlay.aggregate ?? []).map((file) => file.path).filter((path) => !inMap.has(path)),
-        [],
-      );
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
-  // A repository shorter than the fallback window: its oldest step *is* the
-  // root commit, which has no parent to net from. The 2D panel shows an empty
-  // branch diff here too, so this degrades to parity rather than inventing.
-  it.effect("has no aggregate when the window reaches the root commit", () =>
+  // The overlay no longer computes what the working tree changed, so its
+  // steps are commits and nothing else. The working-tree scope reads the
+  // review preview's own source, like the 2D panel does.
+  it.effect("steps commits only, leaving the working tree to the review preview", () =>
     Effect.gen(function* () {
       const root = yield* makeRepo();
-      const overlay = yield* overlayAt(root);
+      const overlay = yield* Effect.gen(function* () {
+        const service = yield* DiffOverlay.DiffOverlayService;
+        return yield* service.getOverlay({ cwd: root, ignoreWhitespace: false });
+      }).pipe(Effect.provide(layerFor(root)));
 
-      assert.strictEqual(overlay.range.kind, "recent-commits");
-      assert.strictEqual(overlay.steps.find((step) => step.title === "first")?.kind, "commit");
-      assert.isNull(overlay.aggregate);
+      assert.deepEqual(
+        [...new Set(overlay.steps.map((step) => step.kind))],
+        ["commit"],
+        "no working-tree step rides along any more",
+      );
+      // `makeRepo` leaves staged, unstaged and untracked changes behind, so a
+      // surviving working-tree step would be visible here.
+      assert.isUndefined(overlay.steps.find((step) => step.title === "Uncommitted changes"));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  // Those uncommitted changes still need somewhere to stand when the
+  // working-tree scope draws them, and a deleted file is in no commit step.
+  it.effect("ghosts a file deleted without being committed", () =>
+    Effect.gen(function* () {
+      const root = yield* makeRepo();
+      const run = (args: ReadonlyArray<string>) =>
+        git(root, args).pipe(Effect.provide(layerFor(root)));
+      // A clean file: `makeRepo` leaves `a.txt` modified, and `git rm` refuses
+      // to remove a file with local changes.
+      yield* run(["rm", "side.txt"]);
+
+      const overlay = yield* Effect.gen(function* () {
+        const service = yield* DiffOverlay.DiffOverlayService;
+        return yield* service.getOverlay({ cwd: root, ignoreWhitespace: false });
+      }).pipe(Effect.provide(layerFor(root)));
+
+      const ghosts = overlay.citymap.files.filter((file) => file.ghost).map((file) => file.path);
+      assert.include(ghosts, "side.txt");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

@@ -801,6 +801,57 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           ignored.sources.find((source) => source.kind === "branch-range")?.diff,
           "",
         );
+
+        // The counts answer the same setting as the patch beside them. A
+        // source whose diff is empty and whose stat is not would be one
+        // response disagreeing with itself.
+        assert.isNotEmpty(included.sources.find((source) => source.kind === "branch-range")?.files);
+        assert.deepEqual(
+          ignored.sources.find((source) => source.kind === "branch-range")?.files,
+          [],
+        );
+      }),
+    );
+
+    // Every consumer of a source quotes its `files` — the 2D panel's header and
+    // 3D Diff's terrain both — so the counts have to be the diff's own. They
+    // are a separate git call from the patch, and the flags that decide what
+    // git counts have to be on both: `--minimal` alone once put 385/61 on one
+    // panel against 384/60 on the other for the same file.
+    it.effect("counts every changed file, agreeing with the patch it ships with", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* git(cwd, ["checkout", "-b", "stats"]);
+        yield* writeTextFile(cwd, "added.txt", "one\ntwo\nthree\n");
+        yield* writeTextFile(cwd, "README.md", "# test\nplus a line\n");
+        yield* git(cwd, ["add", "-A"]);
+        yield* git(cwd, ["commit", "-m", "add and edit"]);
+        yield* writeTextFile(cwd, "untracked.txt", "u1\nu2\n");
+
+        const preview = yield* driver.getReviewDiffPreview({
+          cwd,
+          baseRef: initialBranch,
+          ignoreWhitespace: false,
+        });
+        const branch = preview.sources.find((source) => source.kind === "branch-range");
+        const working = preview.sources.find((source) => source.kind === "working-tree");
+
+        // the branch source's stat covers exactly what the commit touched
+        assert.deepEqual(
+          [...(branch?.files ?? [])]
+            .map((file) => `${file.path} +${file.additions} -${file.deletions}`)
+            .sort(),
+          ["README.md +1 -0", "added.txt +3 -0"],
+        );
+        // and an untracked file reaches the working-tree source's stat, which
+        // is a separate `--no-index` call from the tracked one
+        assert.include(
+          (working?.files ?? []).map((file) => file.path),
+          "untracked.txt",
+        );
       }),
     );
   });

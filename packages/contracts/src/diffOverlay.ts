@@ -16,11 +16,14 @@
  * ten others is twenty, not zero — because the surface is asking "how much
  * work landed here", not "what does the patch say".
  *
- * The whole range as one frame is a *different question* and so a different
- * field: `aggregate` is the net diff across the window, which is what the 2D
- * Diff panel's "Branch changes" entry shows. Summing the steps would answer
- * with churn instead and the two panels would disagree under the same name,
- * which is the failure the scopes exist to prevent.
+ * This carries **only what nothing else in T3 already answers**: the per-commit
+ * breakdown, which no 2D view has, and the citymap. What a scope *currently*
+ * shows — the working tree, the branch against its base — is a
+ * `ReviewDiffPreviewSource`, and 3D Diff reads that same source the 2D panel
+ * does. It used to net the branch here as well, and the two spellings promptly
+ * disagreed by a line over a `--minimal` that only one of them passed. A view
+ * that re-asks a question T3 already answers will drift from it; the fix is
+ * not to test the two into agreement but to leave only one asker.
  */
 import * as Schema from "effect/Schema";
 
@@ -40,14 +43,17 @@ export const DiffOverlayFile = Schema.Struct({
 export type DiffOverlayFile = typeof DiffOverlayFile.Type;
 
 /**
- * One scrubber position: a commit, or the uncommitted working tree that always
- * comes last. Present only when it changed something — a clean tree adds no
- * step rather than a duplicate of the one before it.
+ * One scrubber position: a commit.
+ *
+ * Only commits. The uncommitted tree used to ride along as a final step, back
+ * when the scrubber was the whole surface; it is now a scope of its own, and
+ * it reads the review preview's `working-tree` source like the 2D panel does
+ * rather than being computed a second time here.
  */
 export const DiffOverlayStep = Schema.Struct({
-  /** A commit's full sha, or `working-tree`, matching the review source's id. */
+  /** The commit's full sha. */
   id: Schema.String,
-  kind: Schema.Literals(["commit", "working-tree"]),
+  kind: Schema.Literal("commit"),
   title: Schema.String,
   /**
    * Committer date, not author date: it is the one that agrees with the order
@@ -67,8 +73,9 @@ export type DiffOverlayStep = typeof DiffOverlayStep.Type;
  *   its base — committing straight to the default branch is routine, and an
  *   empty scrubber is worse than a recent-history one. `baseRef` is null here
  *   because the window is a commit count, not a ref.
- * - `working-tree` means there were no commits to step at all, so the only
- *   step (if any) is the uncommitted one.
+ * - `working-tree` means there were no commits to step at all, so there are no
+ *   steps. The working-tree scope still has something to show; it just does
+ *   not come from here.
  */
 export const DiffOverlayRange = Schema.Struct({
   kind: Schema.Literals(["branch-range", "recent-commits", "working-tree"]),
@@ -77,34 +84,11 @@ export const DiffOverlayRange = Schema.Struct({
 });
 export type DiffOverlayRange = typeof DiffOverlayRange.Type;
 
-/**
- * The window as one net frame — `git diff --numstat <base>...HEAD` — rather
- * than the churn of its steps summed.
- *
- * Three dots, because that is what the 2D panel's branch source runs
- * (`GitVcsDriverCore.getReviewDiffPreview`), and rename detection left on for
- * the same reason: this frame is read against that panel's numbers, so it has
- * to ask git the identical question. That makes it deliberately asymmetric
- * with `steps`, which run `--no-renames` so a rename reads as one building
- * emptying and another filling — the right answer for a single commit on a
- * city, and the wrong one for a total that has to match a number on screen
- * somewhere else.
- *
- * Committed work only. Uncommitted changes are the working-tree scope's, the
- * same split the 2D panel makes.
- *
- * Null when the window has no base to net against: a `working-tree` range has
- * no commits at all, and a `recent-commits` range whose oldest step is the
- * repository's root commit has nothing before it to diff from. The 2D panel
- * shows an empty branch diff in both cases, so this degrades to parity with it
- * rather than inventing a number.
- */
 export const DiffOverlay = Schema.Struct({
   cwd: Schema.String,
   generatedAt: Schema.String,
   range: DiffOverlayRange,
   steps: Schema.Array(DiffOverlayStep),
-  aggregate: Schema.NullOr(Schema.Array(DiffOverlayFile)),
   citymap: Citymap,
 });
 export type DiffOverlay = typeof DiffOverlay.Type;
