@@ -85,7 +85,10 @@ export function Dock({ panels, openSheet, openPop, onToggle, onClosePop }: DockP
         </div>
       ) : null}
       {sheet ? (
-        <aside className="mindwalk-glass h-full w-[320px] overflow-hidden rounded-[var(--control-radius)] border border-border shadow-xl @max-[900px]:h-auto @max-[900px]:max-h-[46%] @max-[900px]:w-auto @max-[900px]:min-w-0 @max-[900px]:flex-1">
+        <aside
+          data-mindwalk-sheet=""
+          className="mindwalk-glass h-full w-[320px] overflow-hidden rounded-[var(--control-radius)] border border-border shadow-xl @max-[900px]:h-auto @max-[900px]:max-h-[46%] @max-[900px]:w-auto @max-[900px]:min-w-0 @max-[900px]:flex-1"
+        >
           {sheet.render()}
         </aside>
       ) : null}
