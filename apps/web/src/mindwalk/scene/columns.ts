@@ -152,7 +152,7 @@ export function sizeColumns(city: CityMap, palette: ScenePalette): Column[] {
 
 // --------------------------------------------------------------------- diff
 
-/** One file's churn at a scrubber position: the sum of every step up to it. */
+/** One file's churn in a single step. Steps do not accumulate — see below. */
 export interface FileChurn {
   readonly additions: number;
   readonly deletions: number;
@@ -191,6 +191,14 @@ const MIN_SEGMENT_H = 0.35;
  * thousands, so there is no long tail to compress, and "which file took the
  * most work" is exactly the question the surface is asked.
  *
+ * `fullHeightChurn` is the churn a full-height column stands for, and the
+ * caller passes it rather than it being taken from `churnByPath`, because the
+ * scale has to outlive the frame. Each step shows only its own commit, so
+ * scaling to whatever is on screen would give every commit a full-height
+ * tower and a three-line change would look like a three-thousand-line one.
+ * Scaling to the largest file in the whole range instead makes a small commit
+ * look small, and matches the scrubber's bars, which normalise the same way.
+ *
  * A binary file arrives from the endpoint as `0`/`0` — it has a path and no
  * lines to count. It gets one minimum-height segment in the neutral grey
  * rather than nothing at all: a changed file that renders as bare ground is a
@@ -199,16 +207,14 @@ const MIN_SEGMENT_H = 0.35;
 export function diffColumns(
   city: CityMap,
   churnByPath: ReadonlyMap<string, FileChurn>,
+  fullHeightChurn: number,
   palette: ScenePalette,
 ): Column[] {
   const added = new THREE.Color(palette.city.diffAdded);
   const removed = new THREE.Color(palette.city.diffRemoved);
   const neutral = new THREE.Color(palette.city.unvisited);
 
-  let maxChurn = 0;
-  for (const churn of churnByPath.values()) {
-    maxChurn = Math.max(maxChurn, churn.additions + churn.deletions);
-  }
+  const maxChurn = Math.max(fullHeightChurn, 0);
 
   const columns: Column[] = [];
   for (const file of city.files) {
