@@ -81,6 +81,16 @@ interface HaloSlot {
 const LABEL_Y = 1.8;
 // the inspector docks on the right; selection pans the camera clear of it
 const INSPECTOR_RESERVED_PX = 348;
+/**
+ * The dock re-lays itself out below this width — mindwalk's own 900px rule,
+ * re-keyed to the container because this is a resizable panel. Above it the
+ * inspector is a column on the right; below it the dock becomes a bottom
+ * sheet, so reserving width on the right dodges a panel that is not there and
+ * pans the whole stage hard left on every selection.
+ */
+const DOCK_SHEET_BREAKPOINT_PX = 900;
+/** the bottom sheet's `max-h-[46%]`, so a selection is not panned under it */
+const SHEET_HEIGHT_FRACTION = 0.46;
 
 export function TreeScene({
   city,
@@ -750,7 +760,10 @@ export function TreeScene({
           new THREE.Vector3(pos.x, LEAF_Y, pos.z),
           canvas.clientWidth,
           canvas.clientHeight,
-          INSPECTOR_RESERVED_PX,
+          canvas.clientWidth >= DOCK_SHEET_BREAKPOINT_PX ? INSPECTOR_RESERVED_PX : 0,
+          canvas.clientWidth >= DOCK_SHEET_BREAKPOINT_PX
+            ? 0
+            : canvas.clientHeight * SHEET_HEIGHT_FRACTION,
         );
       }
     } else {
