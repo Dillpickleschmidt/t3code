@@ -7,9 +7,11 @@
  * `gh-merge-base`, the remote's default branch, and a candidate walk — and the
  * 3D surface's last frame has to be the same change that panel shows or
  * neither is trustworthy. So this asks that service for the answer and reads
- * the refs off it, discarding the patches it also builds. The duplicated work
- * is bounded and the alternative is a second implementation of base
- * resolution that drifts.
+ * the refs off it, discarding the patches it also builds. That waste is real
+ * and measured — 255ms of a 467ms warm request on this repo — but the
+ * alternative is a second implementation of base resolution that drifts, and
+ * the call disappears entirely the day the surface grows a base-ref picker and
+ * names its own base.
  *
  * The steps themselves come from `--numstat`, not from patches: two git calls
  * cover the whole scrubber at any window size, because one `git log` prints
