@@ -1,4 +1,5 @@
 import type { DiffOverlay, ScopedThreadRef } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
 import * as Effect from "effect/Effect";
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -20,6 +21,7 @@ import { useCheckpointDiff } from "../lib/checkpointDiffState";
 import { getRenderablePatch, resolveFileDiffPath } from "../lib/diffRendering";
 import { useClientSettings } from "../hooks/useSettings";
 import { selectSource, useReviewDiffPreview } from "../hooks/useReviewDiffPreview";
+import { serverEnvironment } from "../state/server";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useThread } from "../state/entities";
 import { formatShortTimestamp } from "../timestampFormat";
@@ -120,7 +122,14 @@ export default function DiffSurface({
     enabled: scope.kind !== "turn",
     includeFileStats: true,
   });
-  const environmentCwd = reviewPreview.cwd;
+  // The boundary retry's target, from the server's own config — NOT from the
+  // review preview's answer, which is disabled on turn scopes. Reading it off
+  // that query made the citymap fetch fail on exactly the scopes that don't
+  // run it, and re-fetch on every scope switch besides.
+  const serverConfig = useAtomValue(
+    serverEnvironment.configValueAtom(threadRef?.environmentId ?? null),
+  );
+  const environmentCwd = serverConfig?.cwd;
 
   const [overlay, setOverlay] = useState<DiffOverlay | undefined>();
   const [error, setError] = useState<string | undefined>();
