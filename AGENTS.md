@@ -147,6 +147,21 @@ Full glossary with file links: `docs/internals/glossary.md`
 - Don't verify with browsers or computer use unless the user explicitly agrees or requests it.
 - Security is important, but should not be over-indexed on, especially for dev mode/maintainer-only features.
 
+## This fork
+
+"Upstream" means `pingdotgg/t3code` unless a doc says otherwise. Nothing here is
+ever sent there; the only direction that matters is upstream's changes merging
+cleanly _in_.
+
+That makes editing a pre-existing T3 file the expensive move and adding a new
+one free. The whole fork currently deletes 47 upstream lines across 14 files —
+keep it that way, and prefer a new module over an edit to an old one.
+
+Vendored code in `.repos/` has its own upstreams, and they do not carry this
+constraint. Where a vendored copy's own docs ask for verbatim fidelity, that is
+about avoiding subtle porting bugs, not about mergeability — diverge where it is
+a real improvement for how this repo uses it.
+
 ## Agent skills
 
 ### Issue tracker

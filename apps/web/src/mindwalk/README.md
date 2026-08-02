@@ -14,13 +14,24 @@ markup shape, prop contracts, derivations, and hint copy, but their 2,452 lines
 of `styles.css` are gone, replaced by Tailwind on T3's design tokens. Treat
 these as ours to edit, not as copies to diff.
 
-Verbatim on purpose: the squarified-treemap math, instanced-mesh buffer
-indexing, and colour handling in `scene/` render _almost_ right when
-mistranslated, and that class of bug costs days to bisect. Deviations are
-limited to what this repo's stricter tsconfig forces (non-null assertions and
-casts, all erased at runtime), the pre-commit `vp fmt` autoformat, and the
-deliberate list below. Diff against `.repos/mindwalk/web/src` before editing
-anything in `scene/` or `playback/`.
+Verbatim on purpose — but only for one reason: the squarified-treemap math,
+instanced-mesh buffer indexing, and colour handling in `scene/` render _almost_
+right when mistranslated, and that class of bug costs days to bisect. Staying
+close is a defence against silent breakage, **not** a merge obligation. None of
+this exists in `pingdotgg/t3code`, so no amount of divergence here can conflict
+with a T3 upgrade, and `git subtree pull` of mindwalk is a convenience we can
+give up.
+
+So: diverge where it is a real improvement for how this repo uses the scenes,
+and stay verbatim everywhere else, because a gratuitous rewrite of working
+graphics code buys nothing and risks a lot. Diff against `.repos/mindwalk/web/src`
+before editing `scene/` or `playback/` — so that any divergence is a decision,
+recorded below, rather than a slip. Accidental deviation is still the failure
+mode; deliberate deviation is not.
+
+Beyond the deliberate list, the standing exceptions are what this repo's
+stricter tsconfig forces (non-null assertions and casts, all erased at runtime)
+and the pre-commit `vp fmt` autoformat.
 
 ## Light and dark
 
