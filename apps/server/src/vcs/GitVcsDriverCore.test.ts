@@ -784,11 +784,13 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           cwd,
           baseRef: initialBranch,
           ignoreWhitespace: false,
+          includeFileStats: true,
         });
         const ignored = yield* driver.getReviewDiffPreview({
           cwd,
           baseRef: initialBranch,
           ignoreWhitespace: true,
+          includeFileStats: true,
         });
 
         assert.isNotEmpty(included.sources.find((source) => source.kind === "working-tree")?.diff);
@@ -818,6 +820,30 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
     // are a separate git call from the patch, and the flags that decide what
     // git counts have to be on both: `--minimal` alone once put 385/61 on one
     // panel against 384/60 on the other for the same file.
+    // The counts are opt-in because they are extra git calls on a path that
+    // opens with the diff panel — one per source plus one per untracked file.
+    // The panel does not use them, so it must not pay for them.
+    it.effect("computes no file stats unless the caller asks", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "no-stats"]);
+        yield* writeTextFile(cwd, "added.txt", "one\ntwo\n");
+        yield* git(cwd, ["add", "-A"]);
+        yield* git(cwd, ["commit", "-m", "add"]);
+        yield* writeTextFile(cwd, "untracked.txt", "u\n");
+
+        const preview = yield* driver.getReviewDiffPreview({ cwd, baseRef: initialBranch });
+
+        // the patches are still there; only the counting is skipped
+        assert.isNotEmpty(preview.sources.find((source) => source.kind === "branch-range")?.diff);
+        for (const source of preview.sources) {
+          assert.deepEqual(source.files, [], `${source.kind} carries no stats by default`);
+        }
+      }),
+    );
+
     it.effect("counts every changed file, agreeing with the patch it ships with", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
@@ -835,6 +861,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           cwd,
           baseRef: initialBranch,
           ignoreWhitespace: false,
+          includeFileStats: true,
         });
         const branch = preview.sources.find((source) => source.kind === "branch-range");
         const working = preview.sources.find((source) => source.kind === "working-tree");

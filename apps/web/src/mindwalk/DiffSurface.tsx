@@ -112,9 +112,13 @@ export default function DiffSurface({
   // Same hook the 2D panel calls, same refs, same whitespace, same
   // workspace-boundary retry — so "Branch changes" cannot mean one thing here
   // and another over there, and neither can the numbers under it.
+  // `includeFileStats` because the terrain places every changed file: a file
+  // past the patch cap is a building that never appears, where in the 2D panel
+  // it is a row below a banner that says the list is incomplete.
   const reviewPreview = useReviewDiffPreview(threadRef, cwd, {
     ignoreWhitespace: diffIgnoreWhitespace,
     enabled: scope.kind !== "turn",
+    includeFileStats: true,
   });
   const environmentCwd = reviewPreview.cwd;
 

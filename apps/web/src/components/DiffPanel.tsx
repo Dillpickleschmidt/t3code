@@ -408,25 +408,7 @@ export default function DiffPanel({
   );
   const diffFileKeys = useMemo(() => codeViewFiles.map((file) => file.fileKey), [codeViewFiles]);
   const allDiffFilesCollapsed = areAllDiffFilesCollapsed(diffFileKeys, collapsedDiffFileKeys);
-  // For a git scope the counts are the server's, because the patch this panel
-  // renders is capped: past the cap, tallying its hunks reports fewer lines
-  // than the range really changed. `--numstat` has no content to truncate, so
-  // it stays right — and 3D Diff quotes the very same figures. Turn diffs have
-  // no served stat yet, so they still count what they render.
-  const servedStat = selectedTurnId === null ? selectedGitSource?.files : undefined;
-  const diffLineStat = useMemo(
-    () =>
-      servedStat
-        ? servedStat.reduce(
-            (total, file) => ({
-              additions: total.additions + file.additions,
-              deletions: total.deletions + file.deletions,
-            }),
-            { additions: 0, deletions: 0 },
-          )
-        : getDiffLineStat(renderableFiles),
-    [servedStat, renderableFiles],
-  );
+  const diffLineStat = useMemo(() => getDiffLineStat(renderableFiles), [renderableFiles]);
 
   useEffect(() => {
     if (!selectedFilePath) return;

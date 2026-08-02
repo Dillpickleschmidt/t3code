@@ -2285,12 +2285,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const dirtyUntracked = yield* readUntrackedReviewDiffs(input.cwd).pipe(
       Effect.orElseSucceed(() => ({ diff: "", truncated: false })),
     );
-    // The same diffs again as counts. Not parsed out of the patches above,
-    // because those are capped: past the cap a tally of their hunks is short,
-    // and every consumer doing its own tallying is short by its own amount.
-    // `--numstat` carries no content, so it stays right where the patch stops.
-    const dirtyStat = yield* readReviewDiffStat(input.cwd, ["HEAD"], input.ignoreWhitespace);
-    const untrackedStat = yield* readUntrackedReviewDiffStat(input.cwd);
+    // Only when asked. These are extra git calls — one per source plus one per
+    // untracked file — on a path that opens with the diff panel, and the panel
+    // does not use them: it renders the capped patch and says so. See
+    // `includeFileStats`.
+    const dirtyStat = input.includeFileStats
+      ? yield* readReviewDiffStat(input.cwd, ["HEAD"], input.ignoreWhitespace)
+      : [];
+    const untrackedStat = input.includeFileStats
+      ? yield* readUntrackedReviewDiffStat(input.cwd)
+      : [];
     const dirtyDiff = [dirtyTrackedResult.stdout.trimEnd(), dirtyUntracked.diff.trimEnd()]
       .filter((diff) => diff.length > 0)
       .join("\n");
@@ -2326,7 +2330,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         : null;
     const baseDiff = baseResult?.stdout ?? "";
     const baseStat =
-      baseRef && branch
+      input.includeFileStats && baseRef && branch
         ? yield* readReviewDiffStat(input.cwd, [`${baseRef}...HEAD`], input.ignoreWhitespace)
         : [];
     const hashDiff = (diff: string) =>

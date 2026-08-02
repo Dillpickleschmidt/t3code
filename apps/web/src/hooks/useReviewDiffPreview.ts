@@ -33,9 +33,15 @@ export function useReviewDiffPreview(
     readonly baseRef?: string | null;
     readonly ignoreWhitespace: boolean;
     readonly enabled?: boolean;
+    /**
+     * Ask for whole-range counts. Costs a git call per source and one per
+     * untracked file, so only a caller that must place every changed file
+     * pays it — see `includeFileStats` in the contract.
+     */
+    readonly includeFileStats?: boolean;
   },
 ): ReviewDiffPreviewState {
-  const { baseRef, ignoreWhitespace, enabled = true } = options;
+  const { baseRef, ignoreWhitespace, enabled = true, includeFileStats = false } = options;
   const environmentId = threadRef?.environmentId ?? null;
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
 
@@ -43,6 +49,7 @@ export function useReviewDiffPreview(
     cwd: at,
     ...(baseRef ? { baseRef } : {}),
     ignoreWhitespace,
+    ...(includeFileStats ? { includeFileStats: true } : {}),
   });
 
   const primary = useEnvironmentQuery(
