@@ -87,10 +87,13 @@ const INSPECTOR_RESERVED_PX = 348;
  * inspector is a column on the right; below it the dock becomes a bottom
  * sheet, so reserving width on the right dodges a panel that is not there and
  * pans the whole stage hard left on every selection.
+ *
+ * Nothing is reserved for the bottom sheet: it is `h-auto`, usually a fraction
+ * of its `max-h`, and reserving the worst case just trades a sideways lurch
+ * for an upward one. The generic safe margins already keep a selection off the
+ * very edge, which is all this needs to do.
  */
 const DOCK_SHEET_BREAKPOINT_PX = 900;
-/** the bottom sheet's `max-h-[46%]`, so a selection is not panned under it */
-const SHEET_HEIGHT_FRACTION = 0.46;
 
 export function TreeScene({
   city,
@@ -761,9 +764,6 @@ export function TreeScene({
           canvas.clientWidth,
           canvas.clientHeight,
           canvas.clientWidth >= DOCK_SHEET_BREAKPOINT_PX ? INSPECTOR_RESERVED_PX : 0,
-          canvas.clientWidth >= DOCK_SHEET_BREAKPOINT_PX
-            ? 0
-            : canvas.clientHeight * SHEET_HEIGHT_FRACTION,
         );
       }
     } else {

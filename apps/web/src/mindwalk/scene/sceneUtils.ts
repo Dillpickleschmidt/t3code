@@ -57,7 +57,6 @@ export function ensureVisible(
   viewW: number,
   viewH: number,
   reservedRight: number,
-  reservedBottom = 0,
 ) {
   if (viewW === 0 || viewH === 0) return;
   const forward = camera.getWorldDirection(new THREE.Vector3());
@@ -69,7 +68,7 @@ export function ensureVisible(
   const safeL = 48;
   const safeR = Math.max(safeL + 60, viewW - reservedRight - 48);
   const safeT = 120;
-  const safeB = viewH - Math.max(100, reservedBottom + 24);
+  const safeB = viewH - 100;
   const targetX = Math.min(Math.max(sx, safeL), safeR);
   const targetY = Math.min(Math.max(sy, safeT), safeB);
   if (targetX === sx && targetY === sy) return;
