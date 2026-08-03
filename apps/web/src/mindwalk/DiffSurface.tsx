@@ -2,7 +2,7 @@ import type { DiffOverlay, ScopedThreadRef } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import * as Effect from "effect/Effect";
 import { ChevronDownIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   DropdownMenu,
@@ -15,8 +15,10 @@ import {
 } from "~/components/ui/menu";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "~/components/ui/tooltip";
 import { useTheme } from "~/hooks/useTheme";
+import { openDiffFilePrimaryAction } from "../diffFileActions";
 import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelStore";
 import { resolveDiffScope } from "../diffScope";
+import { useOpenInPreferredEditor } from "../editorPreferences";
 import { useCheckpointDiff } from "../lib/checkpointDiffState";
 import { getRenderablePatch, resolveFileDiffPath } from "../lib/diffRendering";
 import { useClientSettings } from "../hooks/useSettings";
@@ -131,10 +133,29 @@ export default function DiffSurface({
   );
   const environmentCwd = serverConfig?.cwd;
 
+  // Clicking a column fires the 2D panel's own file-row action rather than a
+  // second spelling of it. No selection state: the click navigates to the
+  // file's tab, so there is no stage left to highlight.
+  const openInPreferredEditor = useOpenInPreferredEditor(
+    threadRef?.environmentId ?? null,
+    serverConfig?.availableEditors ?? [],
+  );
+  const openColumn = useCallback(
+    (path?: string) => {
+      if (!path) return;
+      openDiffFilePrimaryAction({
+        threadRef,
+        filePath: path,
+        activeCwd: cwd,
+        openInEditor: openInPreferredEditor,
+      });
+    },
+    [threadRef, cwd, openInPreferredEditor],
+  );
+
   const [overlay, setOverlay] = useState<DiffOverlay | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [playing, setPlaying] = useState(false);
-  const [selectedPath, setSelectedPath] = useState<string | undefined>();
   /**
    * Which commit of the branch range the stage is standing in, or `null` for
    * the whole range netted — the frame Branch changes opens on. The scrubber
@@ -146,7 +167,6 @@ export default function DiffSurface({
   useEffect(() => {
     setOverlay(undefined);
     setError(undefined);
-    setSelectedPath(undefined);
     setPlaying(false);
     let cancelled = false;
 
@@ -239,12 +259,10 @@ export default function DiffSurface({
   const workingSource = selectSource(reviewPreview.sources, "unstaged");
   const branchSource = selectSource(reviewPreview.sources, "branch");
 
-  // Scope changes clear the stage's own state. A column selected in one scope
-  // is usually not even present in the next, and a drill-down position means
+  // Scope changes clear the stage's own state: a drill-down position means
   // nothing outside the branch range that produced it.
   const scopeKey = scope.kind === "turn" ? `turn:${scope.turn?.turnId ?? "none"}` : scope.kind;
   useEffect(() => {
-    setSelectedPath(undefined);
     setDrillStep(null);
     setPlaying(false);
   }, [scopeKey]);
@@ -366,7 +384,6 @@ export default function DiffSurface({
     useDiffPanelStore.getState().selectGitScope(threadRef, next);
   };
 
-  const selection3d = selectedPath === undefined ? {} : { selectedPath };
   const mapUnavailable = city !== undefined && city.files.length === 0;
 
   return (
@@ -387,11 +404,10 @@ export default function DiffSurface({
                 columns={columns}
                 playback={NO_WALK}
                 hoverMeta={hoverMeta}
-                onSelect={setSelectedPath}
+                onSelect={openColumn}
                 playing={playing}
                 tallestColumn={tallestColumn}
                 palette={scenePalette}
-                {...selection3d}
               />
               <div className="pointer-events-none absolute inset-0 p-5 @max-[900px]:px-4 @max-[900px]:py-3.5">
                 <div className="pointer-events-auto min-w-0">
