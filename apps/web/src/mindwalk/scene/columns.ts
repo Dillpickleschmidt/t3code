@@ -42,11 +42,10 @@ export interface Column {
 /**
  * The most segments any mode stacks on one file.
  *
- * Two things depend on it: the terrain mesh reserves this many instances per
- * file, and the growth animation keys its in-flight heights by
- * `fileId * MAX_COLUMN_SEGMENTS + index`. A mode that wants a third slab has
- * to raise this — the alternative, growing the buffers on demand, is a second
- * allocation path to keep in step with scene construction forever.
+ * The terrain mesh reserves this many instances per file. A mode that wants a
+ * third slab has to raise this — the alternative, growing the buffers on
+ * demand, is a second allocation path to keep in step with scene construction
+ * forever.
  */
 export const MAX_COLUMN_SEGMENTS = 2;
 

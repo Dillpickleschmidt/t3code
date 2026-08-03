@@ -75,23 +75,6 @@ const TILE_H = 0.14;
 const LABEL_Y = 2.4;
 // the inspector docks on the right; selection pans the camera clear of it
 
-/**
- * One drawn slab: a segment of one file's column.
- *
- * `key` is the identity the growth animation keys its in-flight height by. It
- * has to be per *segment*, not per file — two segments on one file would
- * otherwise fight over a single animated value, which jitters rather than
- * errors and is the kind of defect that survives a screenshot.
- */
-interface TerrainSlot {
-  key: number;
-  fileId: number;
-  target: number;
-  color: THREE.Color;
-}
-
-const slotKey = (fileId: number, segment: number) => fileId * MAX_COLUMN_SEGMENTS + segment;
-
 export function CityScene({
   city,
   columns,
@@ -112,11 +95,8 @@ export function CityScene({
   const tileMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const terrainMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const filesRef = useRef<CityFile[]>([]);
-  const slotsRef = useRef<TerrainSlot[]>([]);
-  /** in-flight segment heights, by slot key — the growth animation's state,
-   * which outlives any one slot table so a column that just went dark can
-   * shrink back into the plain instead of vanishing */
-  const heightsRef = useRef<Map<number, number>>(new Map());
+  /** instanceId → fileId for the terrain mesh, which is all picking needs */
+  const slotFileIdsRef = useRef<number[]>([]);
   /** each file's finished column height, for the things that ride on top of a
    * column rather than draw it: the trail, the firefly, the selection pan */
   const columnTopRef = useRef<Map<number, number>>(new Map());
@@ -131,9 +111,6 @@ export function CityScene({
   const loopRef = useRef<FrameLoop | null>(null);
   const reducedRef = useRef(false);
   const boundsRef = useRef({ cx: 0, cz: 0, size: 120 });
-  // the render loop no longer rewrites every column matrix each frame, so a
-  // slot table swap that lands with every height already settled has to say so
-  const terrainDirtyRef = useRef(false);
   // handlers live in the mount effect; they read playback through this ref
   const playbackRef = useRef(playback);
   playbackRef.current = playback;
@@ -266,8 +243,8 @@ export function CityScene({
       const hit = raycaster.intersectObjects(targets, false)[0];
       if (!hit || hit.instanceId === undefined) return undefined;
       if (hit.object === terrainMeshRef.current) {
-        const slot = slotsRef.current[hit.instanceId];
-        return slot ? filesRef.current[slot.fileId] : undefined;
+        const fileId = slotFileIdsRef.current[hit.instanceId];
+        return fileId === undefined ? undefined : filesRef.current[fileId];
       }
       return filesRef.current[hit.instanceId];
     };
@@ -335,8 +312,6 @@ export function CityScene({
     observer.observe(host);
 
     const clock = new THREE.Clock();
-    const matrix = new THREE.Matrix4();
-    const quaternion = new THREE.Quaternion();
     // one frame; returns whether an animation is still in flight, which is the
     // only thing that books the next one (see FrameLoop)
     const drawFrame = (): boolean => {
@@ -347,57 +322,6 @@ export function CityScene({
         renderer.domElement.clientHeight,
       );
       const labelsEasing = labelSetRef.current?.ease(reducedRef.current) ?? false;
-
-      // grow / shrink terrain segments toward their targets
-      const terrain = terrainMeshRef.current;
-      const slots = slotsRef.current;
-      const heights = heightsRef.current;
-      let terrainMoving = false;
-      if (terrain && slots.length > 0) {
-        let moving = false;
-        // segments of one file arrive together and in order, so a running sum
-        // stacks them: each slab sits on the *current* height of the ones
-        // below it, which keeps a growing stack in one piece
-        let stackFileId = -1;
-        let stackBase = 0;
-        for (let i = 0; i < slots.length; i++) {
-          const slot = slots[i]!;
-          if (slot.fileId !== stackFileId) {
-            stackFileId = slot.fileId;
-            stackBase = 0;
-          }
-          const file = filesRef.current[slot.fileId];
-          if (!file) continue;
-          let cur = heights.get(slot.key) ?? 0;
-          const diff = slot.target - cur;
-          if (Math.abs(diff) > 0.015) {
-            cur = reducedRef.current ? slot.target : cur + diff * 0.13;
-            heights.set(slot.key, cur);
-            moving = true;
-          } else if (cur !== slot.target) {
-            heights.set(slot.key, slot.target);
-            cur = slot.target;
-            moving = true;
-          }
-          const drawn = Math.max(cur, 0.02);
-          const sx = Math.max(file.rect.w, 0.45) + 0.04;
-          const sz = Math.max(file.rect.d, 0.45) + 0.04;
-          matrix.compose(
-            new THREE.Vector3(
-              file.rect.x + file.rect.w / 2 - boundsRef.current.cx,
-              stackBase + drawn / 2 + TILE_H,
-              file.rect.z + file.rect.d / 2 - boundsRef.current.cz,
-            ),
-            quaternion,
-            new THREE.Vector3(sx, drawn, sz),
-          );
-          terrain.setMatrixAt(i, matrix);
-          stackBase += cur;
-        }
-        if (moving || terrainDirtyRef.current) terrain.instanceMatrix.needsUpdate = true;
-        terrainDirtyRef.current = false;
-        terrainMoving = moving;
-      }
 
       // the firefly's breathing pulse is unbounded, so it lives under the
       // playback exception and settles to its base scale when the walk stops
@@ -412,7 +336,7 @@ export function CityScene({
         firefly.scale.setScalar(base * pulse);
       }
       renderer.render(scene, camera);
-      return cameraMoved || labelsEasing || terrainMoving || playbackRunning;
+      return cameraMoved || labelsEasing || playbackRunning;
     };
 
     const loop = new FrameLoop(host, drawFrame);
@@ -446,10 +370,8 @@ export function CityScene({
     const scene = sceneRef.current;
     if (!scene) return;
     filesRef.current = city?.files ?? [];
-    slotsRef.current = [];
-    heightsRef.current = new Map();
+    slotFileIdsRef.current = [];
     boundsRef.current = bounds;
-    terrainDirtyRef.current = true;
     loopRef.current?.invalidate();
     if (!city || city.files.length === 0) return;
 
@@ -632,7 +554,8 @@ export function CityScene({
     };
   }, [city, bounds, palette, colors]);
 
-  // columns → terrain targets and colors
+  // columns → terrain matrices and colors. Heights land at full size in one
+  // pass: the columns deliberately do not animate (see README's deviations)
   useEffect(() => {
     const terrain = terrainMeshRef.current;
     const tiles = tileMeshRef.current;
@@ -643,56 +566,57 @@ export function CityScene({
       tiles.setColorAt(file.id, file.id === selectedId ? colors.selected : baseColor(file, colors));
     }
 
-    const heights = heightsRef.current;
+    const matrix = new THREE.Matrix4();
+    const quaternion = new THREE.Quaternion();
     const tops = new Map<number, number>();
-    const slots: TerrainSlot[] = [];
-    const present = new Set<number>();
+    const slotFileIds: number[] = [];
     for (const column of columns) {
-      let top = 0;
+      const file = city.files[column.fileId];
+      if (!file) continue;
+      // segments of one file arrive together and bottom first, so a running
+      // sum stacks them
+      let stackBase = 0;
       // the capacity the terrain mesh was built with; a mode that stacks
       // deeper raises MAX_COLUMN_SEGMENTS rather than silently losing a slab
-      const segments = column.segments.slice(0, MAX_COLUMN_SEGMENTS);
-      segments.forEach((segment, index) => {
-        const key = slotKey(column.fileId, index);
-        slots.push({
-          key,
-          fileId: column.fileId,
-          target: segment.height,
-          // selection outranks whatever the mode painted, on every slab of the
-          // stack, so a selected file reads as one solid marker
-          color: column.fileId === selectedId ? colors.selected : segment.color,
-        });
-        present.add(key);
-        top += segment.height;
-      });
-      tops.set(column.fileId, top);
-    }
-    // let segments that just went dark shrink back into the plain
-    for (const [key, cur] of heights) {
-      if (present.has(key)) continue;
-      if (cur > 0.04) {
-        slots.push({
-          key,
-          fileId: Math.floor(key / MAX_COLUMN_SEGMENTS),
-          target: 0,
-          color: colors.unvisited,
-        });
-      } else {
-        heights.delete(key);
+      for (const segment of column.segments.slice(0, MAX_COLUMN_SEGMENTS)) {
+        const instanceId = slotFileIds.length;
+        const drawn = Math.max(segment.height, 0.02);
+        const sx = Math.max(file.rect.w, 0.45) + 0.04;
+        const sz = Math.max(file.rect.d, 0.45) + 0.04;
+        matrix.compose(
+          new THREE.Vector3(
+            file.rect.x + file.rect.w / 2 - boundsRef.current.cx,
+            stackBase + drawn / 2 + TILE_H,
+            file.rect.z + file.rect.d / 2 - boundsRef.current.cz,
+          ),
+          quaternion,
+          new THREE.Vector3(sx, drawn, sz),
+        );
+        terrain.setMatrixAt(instanceId, matrix);
+        // selection outranks whatever the mode painted, on every slab of the
+        // stack, so a selected file reads as one solid marker
+        terrain.setColorAt(
+          instanceId,
+          column.fileId === selectedId ? colors.selected : segment.color,
+        );
+        slotFileIds.push(column.fileId);
+        stackBase += segment.height;
       }
+      tops.set(column.fileId, stackBase);
     }
-    // a shrinking stack's slabs must still stack, and the frame loop reads the
-    // run of slots per file rather than their keys to do it
-    slots.sort((a, b) => a.key - b.key);
-
-    slots.forEach((slot, i) => terrain.setColorAt(i, slot.color));
-    terrain.count = slots.length;
+    terrain.count = slotFileIds.length;
+    terrain.instanceMatrix.needsUpdate = true;
     if (terrain.instanceColor) terrain.instanceColor.needsUpdate = true;
+    // `InstancedMesh.raycast` culls against a bounding sphere it computes
+    // once, on the first raycast, and never refreshes. A hover over a frame
+    // with no columns caches an *empty* sphere (radius -1), and picks on any
+    // later column then miss and fall through to the tile behind it.
+    // Invalidate whenever the matrices change so the next raycast recomputes
+    // from the heights it is actually testing.
+    terrain.boundingSphere = null;
     if (tiles.instanceColor) tiles.instanceColor.needsUpdate = true;
-    slotsRef.current = slots;
+    slotFileIdsRef.current = slotFileIds;
     columnTopRef.current = tops;
-    // slot index → segment may have shifted even where nothing is lerping
-    terrainDirtyRef.current = true;
     loopRef.current?.invalidate();
   }, [city, columns, selectedPath, colors]);
 

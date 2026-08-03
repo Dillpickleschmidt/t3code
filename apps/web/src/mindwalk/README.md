@@ -121,6 +121,26 @@ Behavioral, and permanent:
   around 12. 3D Diff's reach past 30, so a surface can pass `tallestColumn`
   and have the fit account for it. Omitted, the behaviour is upstream's
   exactly, which is what the Watch Agent surface still does.
+- **Columns do not animate.** Upstream lerps every column toward its target
+  height each frame (`0.13` per frame, an in-flight heights map keyed per
+  segment, a shrink pass for columns that just went dark). Heights now land at
+  full size in one pass, in the columns effect, because the growth told the
+  viewer nothing the settled skyline does not. That deletes the heights map,
+  the per-segment slot keys and their stacking sort, and the per-frame terrain
+  matrix rewrite: the draw loop no longer touches the terrain at all, so an
+  open scene books frames only for the camera, the labels, and playback. The
+  slot table shrinks to an `instanceId → fileId` map for picking. This is also
+  the reduced-motion behaviour, which for the terrain is now everyone's.
+- **The terrain invalidates its bounding sphere when column matrices change.**
+  `InstancedMesh.raycast` computes a bounding sphere on the first raycast and
+  caches it forever; upstream never invalidates it. On the watch surface that
+  is latent — columns exist from the start and stay under the first-hover
+  sphere — but 3D Diff can open on a frame with _zero_ columns, so a hover
+  there cached an empty sphere (radius -1) and every later click on a column
+  was culled and fell through to the tile behind it. The columns effect now
+  sets `terrain.boundingSphere = null` whenever it rewrites the matrices.
+  `scene/terrainPicking.test.ts` pins the three.js contract this depends on.
+  Upstream has the same latent bug and would take the same one-liner.
 - **`scene/frameLoop.ts` is ours, not mindwalk's.** Both scenes drive it
   instead of mindwalk's unconditional `requestAnimationFrame` loop, so a
   visible but idle scene issues zero draw calls. AGENTS.md's "no continuously
@@ -134,8 +154,10 @@ Behavioral, and permanent:
   users get no drift, as upstream.
 - **The firefly's sine pulse only runs while playback is running**, gated by
   the `playing` prop both scenes now take.
-- **`DirLabelSet.ease`, and the height/halo lerps, report whether they moved.**
-  The loop needs to know when an animation has finished; upstream never asked.
+- **`DirLabelSet.ease`, and `TreeScene`'s halo lerp, report whether they
+  moved.** The loop needs to know when an animation has finished; upstream
+  never asked. (`CityScene`'s height lerp used to be the third reporter,
+  before the columns stopped animating.)
 - **The Timeline's transport keyboard shortcuts are gone.** Upstream installs a
   `window`-level listener for Space, arrows, Home/End, and `S`/`E`/`X`/`M`,
   which is fine when it owns the window and wrong in a panel that can sit
