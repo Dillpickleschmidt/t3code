@@ -696,7 +696,15 @@ export function CityScene({
     loopRef.current?.invalidate();
   }, [city, columns, selectedPath, colors]);
 
-  // the inspector opens over the right edge; pan the selected tile clear of it
+  // The inspector opens over the right edge; pan the selected tile clear of it.
+  //
+  // `palette` is a dependency for the rebuild, not for the color: a theme
+  // switch reconstructs the stage and refits the camera, throwing the pan away
+  // while the selection survives in React state, which drops the selected
+  // column back under the inspector. The trail effect below carries `palette`
+  // it never reads for the same reason. Re-panning when it is not needed costs
+  // nothing — `ensureVisible` returns early once the point is inside the safe
+  // box.
   useEffect(() => {
     const camera = cameraRef.current;
     const controls = controlsRef.current;
@@ -721,7 +729,7 @@ export function CityScene({
       inspectorInsets(canvas).right,
       inspectorInsets(canvas).bottom,
     );
-  }, [city, bounds, selectedPath]);
+  }, [city, bounds, selectedPath, palette]);
 
   // trail: ballistic arcs between recent fixations + the firefly at the head
   useEffect(() => {

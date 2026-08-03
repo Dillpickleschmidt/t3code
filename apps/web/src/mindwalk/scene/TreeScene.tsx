@@ -745,7 +745,14 @@ export function TreeScene({
     loopRef.current?.invalidate();
   }, [city, layout, playback, colors, edgeTint]);
 
-  // selection marker follows the selected leaf
+  // Selection marker follows the selected leaf.
+  //
+  // `palette` is a dependency for the rebuild, not for the color. A theme
+  // switch tears the stage down and constructs a fresh ring and beam — both
+  // hidden — and refits the camera, while the selection itself survives in
+  // React state. So an effect that paints state onto the stage has to run again
+  // on the other side of a rebuild: the trail effect below carries `colors` and
+  // `edgeTint` it never reads for exactly this reason.
   useEffect(() => {
     const selection = selectionRef.current;
     if (!selection || !city || !layout) return;
@@ -783,7 +790,7 @@ export function TreeScene({
       if (camera && controls) restoreCamera(camera, controls, preSelectCameraRef);
     }
     loopRef.current?.invalidate();
-  }, [city, layout, selectedPath]);
+  }, [city, layout, selectedPath, palette]);
 
   // trail arcs + firefly
   useEffect(() => {
