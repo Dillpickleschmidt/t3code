@@ -195,7 +195,15 @@ export const shareDevServer = Effect.fn("devShare.shareDevServer")(function* (in
     });
   }
 
-  yield* ensureTailscaleServe({ localPort: input.webPort, servePort: input.webPort }).pipe(
+  // Vite binds whatever "localhost" resolves to on this machine (::1 on
+  // IPv6-first hosts, 127.0.0.1 elsewhere). Target the name, not an address:
+  // tailscaled dials every resolved loopback, so the proxy reaches Vite on
+  // either stack instead of 502ing when the two disagree.
+  yield* ensureTailscaleServe({
+    localPort: input.webPort,
+    servePort: input.webPort,
+    localHost: "localhost",
+  }).pipe(
     Effect.mapError((error) => {
       const explanation = explainCommandFailure(error);
       return new DevServeFailedError({
