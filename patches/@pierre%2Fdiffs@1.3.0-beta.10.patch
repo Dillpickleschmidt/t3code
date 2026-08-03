@@ -83,3 +83,27 @@ index ff61c90..1e170e5 100644
      }
    },
    "publishConfig": {
+diff --git a/dist/renderers/DiffHunksRenderer.js b/dist/renderers/DiffHunksRenderer.js
+--- a/dist/renderers/DiffHunksRenderer.js
++++ b/dist/renderers/DiffHunksRenderer.js
+@@ -446,7 +446,7 @@
+ 	}
+ 	onHighlightSuccess(diff, result, options, highlighted = true) {
+ 		if (this.renderCache == null) return;
+-		const triggerRenderUpdate = !this.renderCache.highlighted || !areDiffRenderOptionsEqual(this.renderCache.options, options) || !areDiffTargetsEqual(this.renderCache.diff, diff);
++		const triggerRenderUpdate = this.renderCache.result == null || !this.renderCache.highlighted || !areDiffRenderOptionsEqual(this.renderCache.options, options) || !areDiffTargetsEqual(this.renderCache.diff, diff);
+ 		this.renderCache = {
+ 			diff,
+ 			options,
+diff --git a/dist/renderers/FileRenderer.js b/dist/renderers/FileRenderer.js
+--- a/dist/renderers/FileRenderer.js
++++ b/dist/renderers/FileRenderer.js
+@@ -420,7 +420,7 @@
+ 	}
+ 	onHighlightSuccess(file, result, options, highlighted = true) {
+ 		if (this.renderCache == null) return;
+-		const triggerRenderUpdate = !areFilesEqual(file, this.renderCache.file) || !this.renderCache.highlighted || !areFileRenderOptionsEqual(options, this.renderCache.options);
++		const triggerRenderUpdate = this.renderCache.result == null || !areFilesEqual(file, this.renderCache.file) || !this.renderCache.highlighted || !areFileRenderOptionsEqual(options, this.renderCache.options);
+ 		this.renderCache = {
+ 			file,
+ 			options,

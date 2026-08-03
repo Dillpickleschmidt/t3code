@@ -27,6 +27,7 @@ export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
+  getToolCallInput: "orchestration.getToolCallInput",
   searchThreads: "orchestration.searchThreads",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
@@ -1396,6 +1397,23 @@ export type OrchestrationGetFullThreadDiffInput = typeof OrchestrationGetFullThr
 export const OrchestrationGetFullThreadDiffResult = ThreadTurnDiff;
 export type OrchestrationGetFullThreadDiffResult = typeof OrchestrationGetFullThreadDiffResult.Type;
 
+/**
+ * Fetches the full persisted input of a tool call, addressed by the id of one
+ * of the call's activities. Activity payloads shipped over the socket carry
+ * only a capped preview; this is the expand-past-the-cap escape hatch.
+ */
+export const OrchestrationGetToolCallInputInput = Schema.Struct({
+  threadId: ThreadId,
+  activityId: TrimmedNonEmptyString,
+});
+export type OrchestrationGetToolCallInputInput = typeof OrchestrationGetToolCallInputInput.Type;
+
+export const OrchestrationGetToolCallInputResult = Schema.Struct({
+  toolName: Schema.optionalKey(Schema.String),
+  input: Schema.Unknown,
+});
+export type OrchestrationGetToolCallInputResult = typeof OrchestrationGetToolCallInputResult.Type;
+
 export const OrchestrationThreadSearchSource = Schema.Literals(["user", "assistant"]);
 export type OrchestrationThreadSearchSource = typeof OrchestrationThreadSearchSource.Type;
 
@@ -1433,6 +1451,10 @@ export const OrchestrationRpcSchemas = {
   getFullThreadDiff: {
     input: OrchestrationGetFullThreadDiffInput,
     output: OrchestrationGetFullThreadDiffResult,
+  },
+  getToolCallInput: {
+    input: OrchestrationGetToolCallInputInput,
+    output: OrchestrationGetToolCallInputResult,
   },
   searchThreads: {
     input: OrchestrationSearchThreadsInput,
@@ -1486,6 +1508,14 @@ export class OrchestrationGetFullThreadDiffError extends Schema.TaggedErrorClass
 
 export class OrchestrationSearchThreadsError extends Schema.TaggedErrorClass<OrchestrationSearchThreadsError>()(
   "OrchestrationSearchThreadsError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+export class OrchestrationGetToolCallInputError extends Schema.TaggedErrorClass<OrchestrationGetToolCallInputError>()(
+  "OrchestrationGetToolCallInputError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),

@@ -30,7 +30,11 @@ import {
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
   workLogEntryIsToolLike,
+  type WorkLogFilePreview,
 } from "../../session-logic";
+import { openDiffFilePrimaryAction } from "../../diffFileActions";
+import { orchestrationEnvironment } from "~/state/orchestration";
+import { useEnvironmentQuery } from "~/state/query";
 import { type TurnDiffSummary } from "../../types";
 import {
   getRenderablePatch,
@@ -1921,13 +1925,186 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
 
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
+// ---------------------------------------------------------------------------
+// Inline file-change diff preview — renders the server-capped excerpt of a
+// Write/Edit tool call; expanding a capped row shows the full historical
+// write, fetched on demand.
+// ---------------------------------------------------------------------------
+
+function splitPreviewLines(text: string | undefined): string[] {
+  if (text === undefined || text.length === 0) {
+    return [];
+  }
+  const normalized = text.endsWith("\n") ? text.slice(0, -1) : text;
+  return normalized.split("\n");
+}
+
+function buildFileChangePatch(path: string, oldLines: string[], newLines: string[]): string {
+  const oldRange = oldLines.length === 0 ? "-0,0" : `-1,${oldLines.length}`;
+  const newRange = newLines.length === 0 ? "+0,0" : `+1,${newLines.length}`;
+  return [
+    `diff --git a/${path} b/${path}`,
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    `@@ ${oldRange} ${newRange} @@`,
+    ...oldLines.map((line) => `-${line}`),
+    ...newLines.map((line) => `+${line}`),
+  ].join("\n");
+}
+
+function fullTextsFromToolCallInput(input: unknown): { oldText?: string; newText?: string } | null {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) {
+    return null;
+  }
+  const record = input as Record<string, unknown>;
+  const oldText = typeof record.old_string === "string" ? record.old_string : undefined;
+  const newText =
+    typeof record.new_string === "string"
+      ? record.new_string
+      : typeof record.content === "string"
+        ? record.content
+        : typeof record.new_source === "string"
+          ? record.new_source
+          : undefined;
+  if (oldText === undefined && newText === undefined) {
+    return null;
+  }
+  return {
+    ...(oldText !== undefined ? { oldText } : {}),
+    ...(newText !== undefined ? { newText } : {}),
+  };
+}
+
+const WorkEntryFilePreview = memo(function WorkEntryFilePreview(props: {
+  workEntry: TimelineWorkEntry;
+  preview: WorkLogFilePreview;
+  expanded: boolean;
+}) {
+  const { workEntry, preview, expanded } = props;
+  const ctx = use(TimelineRowCtx);
+
+  const needsFullInput = expanded && preview.truncated;
+  const fullInputAtom =
+    needsFullInput && ctx.threadRef
+      ? orchestrationEnvironment.toolCallInput({
+          environmentId: ctx.threadRef.environmentId,
+          input: { threadId: ctx.threadRef.threadId, activityId: workEntry.id },
+        })
+      : null;
+  const fullInputQuery = useEnvironmentQuery(fullInputAtom);
+  const fullTexts = needsFullInput ? fullTextsFromToolCallInput(fullInputQuery.data?.input) : null;
+
+  const previewOldLines = splitPreviewLines(preview.oldText);
+  const previewNewLines = splitPreviewLines(preview.newText);
+  const oldLines =
+    fullTexts?.oldText !== undefined ? splitPreviewLines(fullTexts.oldText) : previewOldLines;
+  const newLines =
+    fullTexts?.newText !== undefined ? splitPreviewLines(fullTexts.newText) : previewNewLines;
+  const filePath = preview.path ?? workEntry.changedFiles?.[0] ?? "file";
+
+  // Previews render fully highlighted regardless of turn age: turn folds
+  // already bound how many are visible at once, and the sync tokenizer makes
+  // each one cheap.
+  //
+  // Memoized on the patch string: FileDiff detects content changes by object
+  // identity, so a fresh parse per render would tear down and rebuild the
+  // diff DOM on every expand/collapse toggle of otherwise-identical content.
+  const patch = buildFileChangePatch(filePath, oldLines, newLines);
+  const renderablePatch = useMemo(
+    () => getRenderablePatch(patch, `tool-preview:${ctx.resolvedTheme}`),
+    [patch, ctx.resolvedTheme],
+  );
+
+  const hiddenLineCount = expanded
+    ? 0
+    : Math.max(0, (preview.oldTotalLines ?? previewOldLines.length) - previewOldLines.length) +
+      Math.max(0, (preview.newTotalLines ?? previewNewLines.length) - previewNewLines.length);
+
+  const handleOpenFile = () =>
+    openDiffFilePrimaryAction({
+      threadRef: ctx.threadRef,
+      filePath,
+      activeCwd: ctx.workspaceRoot,
+      openInEditor: () => {},
+    });
+
+  return (
+    <div
+      className="mt-1 ms-7 me-1"
+      onClick={expanded ? stopRowToggle : undefined}
+      onPointerDown={expanded ? stopRowToggle : undefined}
+    >
+      {expanded && ctx.threadRef ? (
+        <button
+          type="button"
+          onClick={handleOpenFile}
+          className="mb-1 cursor-pointer truncate font-mono text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline"
+        >
+          {formatWorkspaceRelativePath(filePath, ctx.workspaceRoot)}
+        </button>
+      ) : null}
+      {/* The server cap (12 lines / 8 per edit side) already bounds preview
+          height, so the default state shows everything that was shipped;
+          only expanded rows need a scroll container for the full fetch. */}
+      <div
+        className={cn(
+          "rounded-md border border-border/45 bg-background/40",
+          expanded && "max-h-96 cursor-text select-text overflow-auto",
+        )}
+      >
+        {renderablePatch?.kind === "files" ? (
+          renderablePatch.files.map((fileDiff) => (
+            <FileDiff
+              key={resolveFileDiffPath(fileDiff)}
+              fileDiff={fileDiff}
+              // Previews are tiny (≤12 lines): tokenize on the main thread
+              // via the idle-warmed shared highlighter so tokens land on
+              // first paint instead of a worker round-trip later.
+              disableWorkerPool
+              options={{
+                collapsed: false,
+                diffStyle: "unified",
+                theme: resolveDiffThemeName(ctx.resolvedTheme),
+                disableFileHeader: true,
+                disableLineNumbers: true,
+              }}
+            />
+          ))
+        ) : renderablePatch?.kind === "raw" ? (
+          <pre className="whitespace-pre-wrap break-words px-2 py-1.5 font-mono text-[11px] leading-relaxed text-muted-foreground">
+            {renderablePatch.text}
+          </pre>
+        ) : null}
+      </div>
+      {!expanded && (hiddenLineCount > 0 || preview.truncated) ? (
+        <div className="mt-0.5 text-[10px] text-muted-foreground/60">
+          {hiddenLineCount > 0 ? `+${hiddenLineCount.toLocaleString()} more lines` : "Truncated"}
+        </div>
+      ) : null}
+      {needsFullInput && fullTexts === null && fullInputQuery.isPending ? (
+        <div className="mt-0.5 text-[10px] text-muted-foreground/60">Loading full diff…</div>
+      ) : null}
+      {needsFullInput && fullTexts === null && fullInputQuery.error !== null ? (
+        <div className="mt-0.5 text-[10px] text-muted-foreground/60">
+          Couldn't load the full diff — showing the capped preview.
+        </div>
+      ) : null}
+    </div>
+  );
+});
+
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
   workspaceRoot: string | undefined;
 }) {
   const { workEntry, workspaceRoot } = props;
   const activity = use(TimelineRowActivityCtx);
-  const [expanded, setExpanded] = useState(false);
+  // A file-change preview that fully fit the server cap starts open — there
+  // is nothing more to reveal, so making the reader click would only hide
+  // it. Only capped previews (and non-preview rows) start collapsed.
+  const [expanded, setExpanded] = useState(
+    () => workEntry.filePreview !== undefined && !workEntry.filePreview.truncated,
+  );
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
   const entryIconName = showWarningIndicator ? "x" : workEntryIconName(workEntry);
@@ -1941,7 +2118,8 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       : rawPreview;
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot);
-  const canExpand = expandedBody !== null;
+  const filePreview = workEntry.filePreview;
+  const canExpand = expandedBody !== null || filePreview !== undefined;
   const showFailedIndicator = workEntryIndicatesToolFailure(workEntry);
   const showDestructiveRowStyle =
     showFailedIndicator &&
@@ -2065,7 +2243,10 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           </div>
         </div>
       </div>
-      {expanded && canExpand && expandedBody ? (
+      {filePreview ? (
+        <WorkEntryFilePreview workEntry={workEntry} preview={filePreview} expanded={expanded} />
+      ) : null}
+      {expanded && expandedBody && !filePreview ? (
         <div
           className="mt-1 ms-7 cursor-default border-s border-border/45 ps-3 pt-0.5"
           onClick={stopRowToggle}

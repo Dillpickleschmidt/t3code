@@ -204,6 +204,25 @@ function truncateDetail(value: string, limit = 180): string {
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
 }
 
+/**
+ * Tool lifecycle activities need a stable per-call identity so clients can
+ * merge streamed updates and later fetch the call's full input; adapters that
+ * don't put one in `data` still carry it as the runtime item id.
+ */
+function withToolCallId(data: unknown, itemId: unknown): unknown {
+  if (itemId === undefined || itemId === null) {
+    return data;
+  }
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    return data;
+  }
+  const record = data as Record<string, unknown>;
+  if ("toolCallId" in record) {
+    return data;
+  }
+  return { ...record, toolCallId: String(itemId) };
+}
+
 function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined {
   const trimmed = planMarkdown?.trim();
   if (!trimmed) {
@@ -628,7 +647,9 @@ export function runtimeEventToActivities(
             itemType: event.payload.itemType,
             ...(event.payload.status ? { status: event.payload.status } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.data !== undefined
+              ? { data: withToolCallId(event.payload.data, event.itemId) }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -650,7 +671,9 @@ export function runtimeEventToActivities(
           payload: {
             itemType: event.payload.itemType,
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.data !== undefined
+              ? { data: withToolCallId(event.payload.data, event.itemId) }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,

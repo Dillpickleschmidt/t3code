@@ -28,6 +28,7 @@ import {
   type OrchestrationThreadStreamItem,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
+  OrchestrationGetToolCallInputError,
   OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
@@ -1108,6 +1109,31 @@ const makeWsRpcLayer = (
                     message: "Failed to load full thread diff",
                     cause,
                   }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getToolCallInput]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getToolCallInput,
+            projectionSnapshotQuery.getToolCallInput(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetToolCallInputError({
+                    message: "Failed to load tool call input",
+                    cause,
+                  }),
+              ),
+              Effect.flatMap(
+                Option.match({
+                  onNone: () =>
+                    Effect.fail(
+                      new OrchestrationGetToolCallInputError({
+                        message: "Tool call input not found",
+                      }),
+                    ),
+                  onSome: Effect.succeed,
+                }),
               ),
             ),
             { "rpc.aggregate": "orchestration" },

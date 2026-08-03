@@ -151,6 +151,101 @@ function projectRawOutput(value: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
+const FILE_CHANGE_PREVIEW_MAX_LINES = 12;
+const FILE_CHANGE_PREVIEW_MAX_CHARS = 2_000;
+const FILE_CHANGE_PREVIEW_EDIT_SIDE_MAX_LINES = 8;
+const FILE_CHANGE_PREVIEW_EDIT_SIDE_MAX_CHARS = 1_000;
+
+interface CappedPreviewText {
+  text: string;
+  truncated: boolean;
+  totalLines: number;
+}
+
+function capPreviewText(value: string, maxLines: number, maxChars: number): CappedPreviewText {
+  const lines = value.split("\n");
+  let text = lines.slice(0, maxLines).join("\n");
+  let truncated = lines.length > maxLines;
+  if (text.length > maxChars) {
+    text = text.slice(0, maxChars);
+    truncated = true;
+  }
+  return { text, truncated, totalLines: lines.length };
+}
+
+/**
+ * A bounded excerpt of a file-change tool call's input so clients can render
+ * an inline diff preview without shipping whole files over the socket. The
+ * `truncated` flag tells the client whether expanding needs a fetch of the
+ * full persisted input.
+ */
+function projectFileChangePreview(
+  data: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const input = asRecord(data.input);
+  if (!input) {
+    return undefined;
+  }
+  const path =
+    asTrimmedString(input.file_path) ??
+    asTrimmedString(input.path) ??
+    asTrimmedString(input.filePath) ??
+    asTrimmedString(input.notebook_path);
+
+  const oldString = typeof input.old_string === "string" ? input.old_string : null;
+  const newString = typeof input.new_string === "string" ? input.new_string : null;
+  if (oldString !== null || newString !== null) {
+    const oldCap =
+      oldString !== null
+        ? capPreviewText(
+            oldString,
+            FILE_CHANGE_PREVIEW_EDIT_SIDE_MAX_LINES,
+            FILE_CHANGE_PREVIEW_EDIT_SIDE_MAX_CHARS,
+          )
+        : null;
+    const newCap =
+      newString !== null
+        ? capPreviewText(
+            newString,
+            FILE_CHANGE_PREVIEW_EDIT_SIDE_MAX_LINES,
+            FILE_CHANGE_PREVIEW_EDIT_SIDE_MAX_CHARS,
+          )
+        : null;
+    if (!oldCap && !newCap) {
+      return undefined;
+    }
+    return {
+      kind: "edit",
+      ...(path ? { path } : {}),
+      ...(oldCap ? { oldText: oldCap.text, oldTotalLines: oldCap.totalLines } : {}),
+      ...(newCap ? { newText: newCap.text, newTotalLines: newCap.totalLines } : {}),
+      truncated: (oldCap?.truncated ?? false) || (newCap?.truncated ?? false),
+    };
+  }
+
+  const content =
+    typeof input.content === "string"
+      ? input.content
+      : typeof input.new_source === "string"
+        ? input.new_source
+        : null;
+  if (content === null || content.length === 0) {
+    return undefined;
+  }
+  const contentCap = capPreviewText(
+    content,
+    FILE_CHANGE_PREVIEW_MAX_LINES,
+    FILE_CHANGE_PREVIEW_MAX_CHARS,
+  );
+  return {
+    kind: "write",
+    ...(path ? { path } : {}),
+    newText: contentCap.text,
+    newTotalLines: contentCap.totalLines,
+    truncated: contentCap.truncated,
+  };
+}
+
 /**
  * Removes activity payload fields that no current client reads while retaining
  * the full payload in persistence and the event store.
@@ -190,6 +285,19 @@ export function projectActivityPayload(
   const rawOutput = projectRawOutput(data.rawOutput);
   if (rawOutput) {
     projectedData.rawOutput = rawOutput;
+  }
+
+  // Activities persisted before toolCallId stamping can't be deduped per call
+  // in snapshots, so their streamed updates go without a preview; the final
+  // tool.completed activity still gets one.
+  if (
+    payload.itemType === "file_change" &&
+    (asTrimmedString(data.toolCallId) !== null || activity.kind === "tool.completed")
+  ) {
+    const preview = projectFileChangePreview(data);
+    if (preview) {
+      projectedData.preview = preview;
+    }
   }
 
   return {
@@ -247,6 +355,54 @@ function dropStaleContextWindowActivities(
   );
 }
 
+function previewToolCallId(activity: OrchestrationThreadActivity): string | null {
+  if (activity.kind !== "tool.updated" && activity.kind !== "tool.completed") {
+    return null;
+  }
+  const payload = asRecord(activity.payload);
+  const data = asRecord(payload?.data);
+  if (!data || data.preview === undefined) {
+    return null;
+  }
+  return asTrimmedString(data.toolCallId);
+}
+
+/**
+ * Clients merge a tool call's streamed activities into one row, so only the
+ * newest preview per call is ever rendered. Superseded copies would otherwise
+ * multiply snapshot size by the number of streaming updates; strip them when
+ * replaying history. Live `thread.activity-appended` events are untouched.
+ */
+function stripSupersededFileChangePreviews(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlyArray<OrchestrationThreadActivity> {
+  const latestIndexByToolCall = new Map<string, number>();
+  for (let index = 0; index < activities.length; index += 1) {
+    const toolCallId = previewToolCallId(activities[index]!);
+    if (toolCallId !== null) {
+      latestIndexByToolCall.set(toolCallId, index);
+    }
+  }
+  if (latestIndexByToolCall.size === 0) {
+    return activities;
+  }
+  return activities.map((activity, index) => {
+    const toolCallId = previewToolCallId(activity);
+    if (toolCallId === null || latestIndexByToolCall.get(toolCallId) === index) {
+      return activity;
+    }
+    const payload = asRecord(activity.payload)!;
+    const { preview: _preview, ...data } = asRecord(payload.data)!;
+    return {
+      ...activity,
+      payload: {
+        ...payload,
+        data,
+      },
+    };
+  });
+}
+
 export function projectThreadDetailSnapshot(
   snapshot: OrchestrationThreadDetailSnapshot,
 ): OrchestrationThreadDetailSnapshot {
@@ -254,8 +410,8 @@ export function projectThreadDetailSnapshot(
     ...snapshot,
     thread: {
       ...snapshot.thread,
-      activities: dropStaleContextWindowActivities(snapshot.thread.activities).map(
-        projectActivityPayload,
+      activities: stripSupersededFileChangePreviews(
+        dropStaleContextWindowActivities(snapshot.thread.activities).map(projectActivityPayload),
       ),
     },
   };

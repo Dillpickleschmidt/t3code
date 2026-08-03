@@ -1816,6 +1816,76 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       );
     }),
   );
+
+  it.effect("reads a tool call's full persisted input scoped to its thread", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_thread_activities`;
+
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          created_at,
+          sequence
+        )
+        VALUES
+          (
+            'activity-tool-input',
+            'thread-tool-input',
+            'turn-tool-input',
+            'tool',
+            'tool.completed',
+            'Write',
+            '{"itemType":"file_change","status":"completed","data":{"toolName":"Write","toolCallId":"call-tool-input","input":{"file_path":"src/full.ts","content":"full line 1\\nfull line 2"}}}',
+            '2026-05-01T00:00:05.000Z',
+            1
+          ),
+          (
+            'activity-no-input',
+            'thread-tool-input',
+            'turn-tool-input',
+            'info',
+            'context-compaction',
+            'Context compacted',
+            '{"state":"completed"}',
+            '2026-05-01T00:00:06.000Z',
+            2
+          )
+      `;
+
+      const found = yield* snapshotQuery.getToolCallInput({
+        threadId: ThreadId.make("thread-tool-input"),
+        activityId: "activity-tool-input",
+      });
+      assert.isTrue(found._tag === "Some");
+      assert.deepStrictEqual(found._tag === "Some" ? found.value : null, {
+        toolName: "Write",
+        input: { file_path: "src/full.ts", content: "full line 1\nfull line 2" },
+      });
+
+      // Wrong thread id must not read another thread's activity.
+      const crossThread = yield* snapshotQuery.getToolCallInput({
+        threadId: ThreadId.make("thread-other"),
+        activityId: "activity-tool-input",
+      });
+      assert.isTrue(crossThread._tag === "None");
+
+      // Activities without tool input resolve to none instead of failing.
+      const noInput = yield* snapshotQuery.getToolCallInput({
+        threadId: ThreadId.make("thread-tool-input"),
+        activityId: "activity-no-input",
+      });
+      assert.isTrue(noInput._tag === "None");
+    }),
+  );
 });
 
 it.effect(

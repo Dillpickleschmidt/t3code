@@ -60,6 +60,22 @@ export type WorkLogToolLifecycleStatus =
   | "declined"
   | "stopped";
 
+/**
+ * Server-capped excerpt of a file-change tool call's input, shipped in the
+ * activity payload so the timeline can render an inline diff preview.
+ * `truncated` means the full input exceeds the cap and needs a fetch
+ * (`orchestration.getToolCallInput`) to display in full.
+ */
+export interface WorkLogFilePreview {
+  kind: "write" | "edit";
+  path?: string;
+  oldText?: string;
+  newText?: string;
+  oldTotalLines?: number;
+  newTotalLines?: number;
+  truncated: boolean;
+}
+
 export interface WorkLogEntry {
   id: string;
   createdAt: string;
@@ -78,6 +94,7 @@ export interface WorkLogEntry {
   toolLifecycleStatus?: WorkLogToolLifecycleStatus;
   /** Originating orchestration activity kind (e.g. `user-input.requested`) for row chrome. */
   sourceActivityKind?: OrchestrationThreadActivity["kind"];
+  filePreview?: WorkLogFilePreview;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -749,6 +766,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (toolCallId) {
     entry.toolCallId = toolCallId;
   }
+  const filePreview = extractFilePreview(payload);
+  if (filePreview) {
+    entry.filePreview = filePreview;
+  }
   let toolLifecycleStatus = extractWorkLogToolLifecycleStatus(payload);
   if (!toolLifecycleStatus && activity.kind === "tool.completed") {
     toolLifecycleStatus = "completed";
@@ -818,6 +839,7 @@ function mergeDerivedWorkLogEntries(
   const toolCallId = next.toolCallId ?? previous.toolCallId;
   const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus;
   const toolData = next.toolData ?? previous.toolData;
+  const filePreview = next.filePreview ?? previous.filePreview;
   return {
     ...previous,
     ...next,
@@ -832,6 +854,7 @@ function mergeDerivedWorkLogEntries(
     ...(toolCallId ? { toolCallId } : {}),
     ...(toolLifecycleStatus !== undefined ? { toolLifecycleStatus } : {}),
     ...(toolData !== undefined ? { toolData } : {}),
+    ...(filePreview !== undefined ? { filePreview } : {}),
   };
 }
 
@@ -864,6 +887,34 @@ function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | un
 
 function normalizeCompactToolLabel(value: string): string {
   return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
+}
+
+function extractFilePreview(
+  payload: Record<string, unknown> | null,
+): WorkLogFilePreview | undefined {
+  const data = asRecord(payload?.data);
+  const preview = asRecord(data?.preview);
+  if (!preview) {
+    return undefined;
+  }
+  const kind = preview.kind === "write" || preview.kind === "edit" ? preview.kind : null;
+  const oldText = typeof preview.oldText === "string" ? preview.oldText : undefined;
+  const newText = typeof preview.newText === "string" ? preview.newText : undefined;
+  if (!kind || (oldText === undefined && newText === undefined)) {
+    return undefined;
+  }
+  const path = asTrimmedString(preview.path);
+  const oldTotalLines = asNumber(preview.oldTotalLines);
+  const newTotalLines = asNumber(preview.newTotalLines);
+  return {
+    kind,
+    ...(path !== null ? { path } : {}),
+    ...(oldText !== undefined ? { oldText } : {}),
+    ...(newText !== undefined ? { newText } : {}),
+    ...(oldTotalLines !== null ? { oldTotalLines } : {}),
+    ...(newTotalLines !== null ? { newTotalLines } : {}),
+    truncated: preview.truncated === true,
+  };
 }
 
 function toLatestProposedPlanState(proposedPlan: ProposedPlan): LatestProposedPlanState {

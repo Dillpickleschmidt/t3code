@@ -300,6 +300,12 @@ function mapProposedPlanRow(
   };
 }
 
+function asRecordOrNull(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
 function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
   return (cause: unknown): ProjectionRepositoryError =>
     Schema.isSchemaError(cause)
@@ -967,6 +973,27 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           sequence ASC,
           created_at ASC,
           activity_id ASC
+      `,
+  });
+
+  const getThreadActivityRowById = SqlSchema.findOneOption({
+    Request: Schema.Struct({ threadId: ThreadId, activityId: Schema.String }),
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: ({ threadId, activityId }) =>
+      sql`
+        SELECT
+          activity_id AS "activityId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          tone,
+          kind,
+          summary,
+          payload_json AS "payload",
+          sequence,
+          created_at AS "createdAt"
+        FROM projection_thread_activities
+        WHERE activity_id = ${activityId}
+          AND thread_id = ${threadId}
       `,
   });
 
@@ -2257,6 +2284,29 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ),
       );
 
+  const getToolCallInput: ProjectionSnapshotQueryShape["getToolCallInput"] = (input) =>
+    getThreadActivityRowById({ threadId: input.threadId, activityId: input.activityId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getToolCallInput:query",
+          "ProjectionSnapshotQuery.getToolCallInput:decodeRow",
+        ),
+      ),
+      Effect.map(
+        Option.flatMap((row) => {
+          const payload = asRecordOrNull(row.payload);
+          const data = asRecordOrNull(payload?.data);
+          if (!data || data.input === undefined) {
+            return Option.none();
+          }
+          return Option.some({
+            ...(typeof data.toolName === "string" ? { toolName: data.toolName } : {}),
+            input: data.input,
+          });
+        }),
+      ),
+    );
+
   return {
     getCommandReadModel,
     getSnapshot,
@@ -2273,6 +2323,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getThreadShellById,
     getThreadDetailById,
     getThreadDetailSnapshot,
+    getToolCallInput,
   } satisfies ProjectionSnapshotQueryShape;
 });
 

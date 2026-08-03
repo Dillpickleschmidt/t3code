@@ -233,6 +233,195 @@ describe("projectActivityPayload", () => {
   });
 });
 
+describe("file-change preview", () => {
+  function makeFileChangeActivity(
+    id: string,
+    kind: "tool.updated" | "tool.completed",
+    data: Record<string, unknown>,
+  ): OrchestrationThreadActivity {
+    return {
+      id: EventId.make(id),
+      tone: "tool",
+      kind,
+      summary: "Edit",
+      payload: {
+        itemType: "file_change",
+        title: "Edit",
+        status: kind === "tool.completed" ? "completed" : "inProgress",
+        data,
+      },
+      turnId: TurnId.make("turn-preview"),
+      createdAt: "2026-07-27T00:00:00.000Z",
+    };
+  }
+
+  function projectedPreview(activity: OrchestrationThreadActivity): unknown {
+    const payload = projectActivityPayload(activity).payload as {
+      data?: { preview?: unknown };
+    };
+    return payload.data?.preview;
+  }
+
+  it("attaches a capped preview for write inputs", () => {
+    const activity = makeFileChangeActivity("write-short", "tool.updated", {
+      toolName: "Write",
+      toolCallId: "tool-write",
+      input: { file_path: "src/app.ts", content: "line 1\nline 2\nline 3" },
+    });
+    expect(projectedPreview(activity)).toEqual({
+      kind: "write",
+      path: "src/app.ts",
+      newText: "line 1\nline 2\nline 3",
+      newTotalLines: 3,
+      truncated: false,
+    });
+  });
+
+  it("caps long write content by lines and flags truncation", () => {
+    const lines = Array.from({ length: 40 }, (_, index) => `line ${index + 1}`);
+    const activity = makeFileChangeActivity("write-long", "tool.updated", {
+      toolName: "Write",
+      toolCallId: "tool-write-long",
+      input: { file_path: "src/big.ts", content: lines.join("\n") },
+    });
+    expect(projectedPreview(activity)).toEqual({
+      kind: "write",
+      path: "src/big.ts",
+      newText: lines.slice(0, 12).join("\n"),
+      newTotalLines: 40,
+      truncated: true,
+    });
+  });
+
+  it("attaches both sides of an edit input", () => {
+    const activity = makeFileChangeActivity("edit", "tool.completed", {
+      toolName: "Edit",
+      toolCallId: "tool-edit",
+      input: {
+        file_path: "src/app.ts",
+        old_string: "const a = 1;",
+        new_string: "const a = 2;\nconst b = 3;",
+      },
+    });
+    expect(projectedPreview(activity)).toEqual({
+      kind: "edit",
+      path: "src/app.ts",
+      oldText: "const a = 1;",
+      oldTotalLines: 1,
+      newText: "const a = 2;\nconst b = 3;",
+      newTotalLines: 2,
+      truncated: false,
+    });
+  });
+
+  it("skips previews on streamed updates persisted before toolCallId stamping", () => {
+    const legacyData = {
+      toolName: "Write",
+      input: { file_path: "src/app.ts", content: "line 1" },
+    };
+    expect(
+      projectedPreview(makeFileChangeActivity("legacy-updated", "tool.updated", legacyData)),
+    ).toBeUndefined();
+    // The final activity still gets one — old threads keep a preview per call.
+    expect(
+      projectedPreview(makeFileChangeActivity("legacy-completed", "tool.completed", legacyData)),
+    ).toMatchObject({ kind: "write", truncated: false });
+  });
+
+  it("keeps the preview only on the newest snapshot activity per tool call", () => {
+    const call = (id: string, kind: "tool.updated" | "tool.completed", content: string) =>
+      makeFileChangeActivity(id, kind, {
+        toolName: "Write",
+        toolCallId: "tool-call-a",
+        input: { file_path: "src/app.ts", content },
+      });
+    const other = makeFileChangeActivity("other-call", "tool.completed", {
+      toolName: "Write",
+      toolCallId: "tool-call-b",
+      input: { file_path: "src/other.ts", content: "other content" },
+    });
+
+    const projected = projectThreadDetailSnapshot({
+      snapshotSequence: 7,
+      thread: makeThread([
+        call("call-a-1", "tool.updated", "line 1"),
+        call("call-a-2", "tool.updated", "line 1\nline 2"),
+        other,
+        call("call-a-3", "tool.completed", "line 1\nline 2\nline 3"),
+      ]),
+    });
+
+    const previews = projected.thread.activities.map(
+      (activity) => (activity.payload as { data?: { preview?: unknown } }).data?.preview,
+    );
+    expect(previews[0]).toBeUndefined();
+    expect(previews[1]).toBeUndefined();
+    expect(previews[2]).toMatchObject({ path: "src/other.ts" });
+    expect(previews[3]).toMatchObject({
+      path: "src/app.ts",
+      newText: "line 1\nline 2\nline 3",
+    });
+  });
+
+  it("keeps previews on live activity-appended events", () => {
+    const activity = makeFileChangeActivity("live-update", "tool.updated", {
+      toolName: "Write",
+      toolCallId: "tool-live",
+      input: { file_path: "src/live.ts", content: "streamed line" },
+    });
+    const event = {
+      sequence: 10,
+      eventId: EventId.make("event-live-preview"),
+      aggregateKind: "thread",
+      aggregateId: ThreadId.make("thread-projection"),
+      occurredAt: "2026-07-27T00:00:03.000Z",
+      commandId: null,
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      type: "thread.activity-appended",
+      payload: {
+        threadId: ThreadId.make("thread-projection"),
+        activity,
+      },
+    } satisfies Extract<OrchestrationEvent, { type: "thread.activity-appended" }>;
+
+    const projected = projectActivityEvent(event);
+    expect(
+      projected.type === "thread.activity-appended"
+        ? (projected.payload.activity.payload as { data?: { preview?: unknown } }).data?.preview
+        : undefined,
+    ).toMatchObject({ kind: "write", path: "src/live.ts" });
+  });
+
+  it("derives a work log entry with the merged file preview on the web client", () => {
+    const updated = makeFileChangeActivity("derive-1", "tool.updated", {
+      toolName: "Write",
+      toolCallId: "tool-derive",
+      input: { file_path: "src/app.ts", content: "line 1" },
+    });
+    const completed = makeFileChangeActivity("derive-2", "tool.completed", {
+      toolName: "Write",
+      toolCallId: "tool-derive",
+      input: { file_path: "src/app.ts", content: "line 1\nline 2" },
+    });
+
+    const entries = deriveWorkLogEntries([
+      projectActivityPayload(updated),
+      projectActivityPayload(completed),
+    ]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.filePreview).toEqual({
+      kind: "write",
+      path: "src/app.ts",
+      newText: "line 1\nline 2",
+      newTotalLines: 2,
+      truncated: false,
+    });
+    expect(entries[0]?.id).toBe("derive-2");
+  });
+});
+
 describe("context-window snapshot dedup", () => {
   function makeContextWindowActivity(
     id: string,

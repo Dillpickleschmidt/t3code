@@ -9,6 +9,8 @@
 import type {
   CheckpointRef,
   OrchestrationCheckpointSummary,
+  OrchestrationGetToolCallInputInput,
+  OrchestrationGetToolCallInputResult,
   OrchestrationProject,
   OrchestrationProjectShell,
   OrchestrationReadModel,
@@ -168,6 +170,15 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadDetailById: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<OrchestrationThread>, ProjectionRepositoryError>;
+
+  /**
+   * Read the full persisted input of one tool-call activity, bypassing the
+   * capped preview that activity payloads carry over the socket. `None` when
+   * the activity doesn't exist in the thread or has no tool input.
+   */
+  readonly getToolCallInput: (
+    input: OrchestrationGetToolCallInputInput,
+  ) => Effect.Effect<Option.Option<OrchestrationGetToolCallInputResult>, ProjectionRepositoryError>;
 
   /**
    * Read a single active thread detail together with the projection snapshot

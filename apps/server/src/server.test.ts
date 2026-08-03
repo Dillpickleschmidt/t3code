@@ -735,6 +735,7 @@ const buildAppUnderTest = (options?: {
               threads: [],
               updatedAt: "1970-01-01T00:00:00.000Z",
             }),
+          getToolCallInput: () => Effect.succeed(Option.none()),
           searchThreads: () => Effect.succeed({ matches: [] }),
           getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
           getProjectShellById: () => Effect.succeed(Option.none()),

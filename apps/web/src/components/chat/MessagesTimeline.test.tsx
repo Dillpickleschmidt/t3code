@@ -630,6 +630,78 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain('data-testid="file-diff"');
   });
 
+  it("renders capped previews collapsed with the highlighted diff and a more-lines chip", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "work",
+            createdAt: "2026-03-17T19:10:00.000Z",
+            entry: {
+              id: "work-old",
+              createdAt: "2026-03-17T19:10:00.000Z",
+              turnId: null,
+              label: "Edit",
+              tone: "tool",
+              itemType: "file_change",
+              toolLifecycleStatus: "completed",
+              filePreview: {
+                kind: "edit",
+                path: "src/demo-user.ts",
+                oldText: "  return old",
+                oldTotalLines: 9,
+                newText: "  return updated",
+                newTotalLines: 9,
+                truncated: true,
+              },
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain('data-testid="file-diff"');
+    expect(markup).toContain("+16 more lines");
+  });
+
+  it("starts uncapped file-change previews expanded with no more-lines chip", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "work",
+            createdAt: "2026-03-17T19:10:00.000Z",
+            entry: {
+              id: "work-old",
+              createdAt: "2026-03-17T19:10:00.000Z",
+              turnId: null,
+              label: "Edit",
+              tone: "tool",
+              itemType: "file_change",
+              toolLifecycleStatus: "completed",
+              filePreview: {
+                kind: "edit",
+                path: "src/demo-user.ts",
+                oldText: "  return old",
+                oldTotalLines: 1,
+                newText: "  return updated",
+                newTotalLines: 1,
+                truncated: false,
+              },
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain('data-testid="file-diff"');
+    expect(markup).not.toContain("more lines");
+  });
+
   it("renders a failure marker for failed tool lifecycle entries", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline

@@ -4,6 +4,9 @@ import * as Schema from "effect/Schema";
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useTheme } from "../hooks/useTheme";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
+import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
+
+const WARM_HIGHLIGHT_LANGUAGES = ["typescript", "tsx", "javascript", "json", "markdown"];
 
 export class DiffWorkerError extends Schema.TaggedErrorClass<DiffWorkerError>()("DiffWorkerError", {
   operation: Schema.Literals(["create-worker", "get-render-options", "set-render-options"]),
@@ -13,6 +16,38 @@ export class DiffWorkerError extends Schema.TaggedErrorClass<DiffWorkerError>()(
   override get message(): string {
     return `Diff worker operation ${this.operation} failed for theme ${this.themeName}.`;
   }
+}
+
+/**
+ * Both highlighters initialize lazily on their first request, which puts
+ * worker spawn + shiki + theme + grammar loading on the first diff's paint
+ * path. Warming at idle moves that off-screen: the worker pool serves the
+ * large diff surfaces, and the shared main-thread highlighter lets small
+ * inline previews (which render with `disableWorkerPool`) tokenize
+ * synchronously on first paint with no flash.
+ */
+function DiffWorkerPoolWarmup() {
+  const workerPool = useWorkerPool();
+
+  useEffect(() => {
+    if (!workerPool || workerPool.isInitialized()) {
+      return;
+    }
+    const warm = () => {
+      void workerPool.initialize(WARM_HIGHLIGHT_LANGUAGES).catch(() => {});
+      for (const language of WARM_HIGHLIGHT_LANGUAGES) {
+        void getSyntaxHighlighterPromise(language).catch(() => {});
+      }
+    };
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(warm, { timeout: 2_000 });
+      return () => cancelIdleCallback(id);
+    }
+    const timer = setTimeout(warm, 300);
+    return () => clearTimeout(timer);
+  }, [workerPool]);
+
+  return null;
 }
 
 function DiffWorkerThemeSync({ themeName }: { themeName: DiffThemeName }) {
@@ -77,6 +112,7 @@ export function DiffWorkerPoolProvider({ children }: { children?: ReactNode }) {
         useTokenTransformer: true,
       }}
     >
+      <DiffWorkerPoolWarmup />
       <DiffWorkerThemeSync themeName={diffThemeName} />
       {children}
     </WorkerPoolContextProvider>
