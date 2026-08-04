@@ -51,6 +51,7 @@ import { ProjectionThreadProposedPlan } from "../../persistence/Services/Project
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
+import { assembleFullFileChangePatch } from "../ActivityPayloadProjection.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
   ProjectionSnapshotQuery,
@@ -2296,16 +2297,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         Option.flatMap((row) => {
           const payload = asRecordOrNull(row.payload);
           const data = asRecordOrNull(payload?.data);
-          // Claude-style tools persist their input; Codex file changes carry
-          // the full per-file diffs on the lifecycle item instead.
-          const input = data?.input !== undefined ? data.input : asRecordOrNull(data?.item);
-          if (!data || input === undefined || input === null) {
-            return Option.none();
-          }
-          return Option.some({
-            ...(typeof data.toolName === "string" ? { toolName: data.toolName } : {}),
-            input,
-          });
+          const assembled = data !== null ? assembleFullFileChangePatch(data) : undefined;
+          return assembled !== undefined ? Option.some(assembled) : Option.none();
         }),
       ),
     );

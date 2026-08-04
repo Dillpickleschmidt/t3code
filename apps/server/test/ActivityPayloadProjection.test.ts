@@ -262,6 +262,16 @@ describe("file-change preview", () => {
     return payload.data?.preview;
   }
 
+  function expectedWritePatch(path: string, lines: ReadonlyArray<string>): string {
+    return [
+      `diff --git a/${path} b/${path}`,
+      `--- a/${path}`,
+      `+++ b/${path}`,
+      `@@ -0,0 +1,${lines.length} @@`,
+      ...lines.map((line) => `+${line}`),
+    ].join("\n");
+  }
+
   it("attaches a capped preview for write inputs", () => {
     const activity = makeFileChangeActivity("write-short", "tool.updated", {
       toolName: "Write",
@@ -269,10 +279,9 @@ describe("file-change preview", () => {
       input: { file_path: "src/app.ts", content: "line 1\nline 2\nline 3" },
     });
     expect(projectedPreview(activity)).toEqual({
-      kind: "write",
       path: "src/app.ts",
-      newText: "line 1\nline 2\nline 3",
-      newTotalLines: 3,
+      patch: expectedWritePatch("src/app.ts", ["line 1", "line 2", "line 3"]),
+      hiddenLineCount: 0,
       truncated: false,
     });
   });
@@ -285,10 +294,9 @@ describe("file-change preview", () => {
       input: { file_path: "src/big.ts", content: lines.join("\n") },
     });
     expect(projectedPreview(activity)).toEqual({
-      kind: "write",
       path: "src/big.ts",
-      newText: lines.slice(0, 12).join("\n"),
-      newTotalLines: 40,
+      patch: expectedWritePatch("src/big.ts", lines.slice(0, 12)),
+      hiddenLineCount: 28,
       truncated: true,
     });
   });
@@ -304,12 +312,17 @@ describe("file-change preview", () => {
       },
     });
     expect(projectedPreview(activity)).toEqual({
-      kind: "edit",
       path: "src/app.ts",
-      oldText: "const a = 1;",
-      oldTotalLines: 1,
-      newText: "const a = 2;\nconst b = 3;",
-      newTotalLines: 2,
+      patch: [
+        "diff --git a/src/app.ts b/src/app.ts",
+        "--- a/src/app.ts",
+        "+++ b/src/app.ts",
+        "@@ -1,1 +1,2 @@",
+        "-const a = 1;",
+        "+const a = 2;",
+        "+const b = 3;",
+      ].join("\n"),
+      hiddenLineCount: 0,
       truncated: false,
     });
   });
@@ -325,7 +338,7 @@ describe("file-change preview", () => {
     // The final activity still gets one — old threads keep a preview per call.
     expect(
       projectedPreview(makeFileChangeActivity("legacy-completed", "tool.completed", legacyData)),
-    ).toMatchObject({ kind: "write", truncated: false });
+    ).toMatchObject({ truncated: false });
   });
 
   it("assembles a capped patch preview for Codex file changes", () => {
@@ -357,24 +370,23 @@ describe("file-change preview", () => {
     });
 
     const preview = projectedPreview(activity) as {
-      kind: string;
       path: string;
       patch: string;
-      patchTotalLines: number;
+      hiddenLineCount: number;
       truncated: boolean;
     };
     expect(preview).toMatchObject({
-      kind: "patch",
       path: "src/app.ts",
       truncated: true,
     });
     expect(preview.patch.startsWith("diff --git a/src/app.ts b/src/app.ts")).toBe(true);
     expect(preview.patch.split("\n")).toHaveLength(12);
-    // File one: 3 header lines + 22 diff lines; file two: 3 + 2.
-    expect(preview.patchTotalLines).toBe(30);
+    // 30 assembled lines (file one: 3 headers + 22 diff; file two: 3 + 2),
+    // 12 shown.
+    expect(preview.hiddenLineCount).toBe(18);
 
     const entries = deriveWorkLogEntries([projectActivityPayload(activity)]);
-    expect(entries[0]?.filePreview).toMatchObject({ kind: "patch", truncated: true });
+    expect(entries[0]?.filePreview).toMatchObject({ truncated: true, hiddenLineCount: 18 });
   });
 
   it("keeps the preview only on the newest snapshot activity per tool call", () => {
@@ -406,10 +418,8 @@ describe("file-change preview", () => {
     expect(previews[0]).toBeUndefined();
     expect(previews[1]).toBeUndefined();
     expect(previews[2]).toMatchObject({ path: "src/other.ts" });
-    expect(previews[3]).toMatchObject({
-      path: "src/app.ts",
-      newText: "line 1\nline 2\nline 3",
-    });
+    expect(previews[3]).toMatchObject({ path: "src/app.ts" });
+    expect((previews[3] as { patch: string }).patch).toContain("+line 3");
   });
 
   it("keeps previews on live activity-appended events", () => {
@@ -440,7 +450,7 @@ describe("file-change preview", () => {
       projected.type === "thread.activity-appended"
         ? (projected.payload.activity.payload as { data?: { preview?: unknown } }).data?.preview
         : undefined,
-    ).toMatchObject({ kind: "write", path: "src/live.ts" });
+    ).toMatchObject({ path: "src/live.ts" });
   });
 
   it("derives a work log entry with the merged file preview on the web client", () => {
@@ -461,10 +471,9 @@ describe("file-change preview", () => {
     ]);
     expect(entries).toHaveLength(1);
     expect(entries[0]?.filePreview).toEqual({
-      kind: "write",
       path: "src/app.ts",
-      newText: "line 1\nline 2",
-      newTotalLines: 2,
+      patch: expectedWritePatch("src/app.ts", ["line 1", "line 2"]),
+      hiddenLineCount: 0,
       truncated: false,
     });
     expect(entries[0]?.id).toBe("derive-2");

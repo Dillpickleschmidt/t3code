@@ -61,22 +61,16 @@ export type WorkLogToolLifecycleStatus =
   | "stopped";
 
 /**
- * Server-capped excerpt of a file-change tool call, shipped in the activity
- * payload so the timeline can render an inline diff preview. Claude-style
- * tools produce `write`/`edit` previews from the tool input; Codex file
- * changes produce a `patch` preview carrying an assembled unified diff.
- * `truncated` means the full change exceeds the cap and needs a fetch
- * (`orchestration.getToolCallInput`) to display in full.
+ * Server-capped excerpt of a file-change tool call, pre-assembled into a
+ * renderable patch and shipped in the activity payload. The server owns all
+ * provider shapes (Claude write/edit inputs, Codex per-file diffs); clients
+ * only render. `truncated` means the full change exceeds the cap and needs a
+ * fetch (`orchestration.getToolCallInput`) to display in full.
  */
 export interface WorkLogFilePreview {
-  kind: "write" | "edit" | "patch";
   path?: string;
-  oldText?: string;
-  newText?: string;
-  oldTotalLines?: number;
-  newTotalLines?: number;
-  patch?: string;
-  patchTotalLines?: number;
+  patch: string;
+  hiddenLineCount: number;
   truncated: boolean;
 }
 
@@ -901,32 +895,15 @@ function extractFilePreview(
   if (!preview) {
     return undefined;
   }
-  const kind =
-    preview.kind === "write" || preview.kind === "edit" || preview.kind === "patch"
-      ? preview.kind
-      : null;
-  const oldText = typeof preview.oldText === "string" ? preview.oldText : undefined;
-  const newText = typeof preview.newText === "string" ? preview.newText : undefined;
   const patch = typeof preview.patch === "string" ? preview.patch : undefined;
-  if (
-    !kind ||
-    (kind === "patch" ? patch === undefined : oldText === undefined && newText === undefined)
-  ) {
+  if (patch === undefined || patch.length === 0) {
     return undefined;
   }
   const path = asTrimmedString(preview.path);
-  const oldTotalLines = asNumber(preview.oldTotalLines);
-  const newTotalLines = asNumber(preview.newTotalLines);
-  const patchTotalLines = asNumber(preview.patchTotalLines);
   return {
-    kind,
     ...(path !== null ? { path } : {}),
-    ...(oldText !== undefined ? { oldText } : {}),
-    ...(newText !== undefined ? { newText } : {}),
-    ...(oldTotalLines !== null ? { oldTotalLines } : {}),
-    ...(newTotalLines !== null ? { newTotalLines } : {}),
-    ...(patch !== undefined ? { patch } : {}),
-    ...(patchTotalLines !== null ? { patchTotalLines } : {}),
+    patch,
+    hiddenLineCount: asNumber(preview.hiddenLineCount) ?? 0,
     truncated: preview.truncated === true,
   };
 }

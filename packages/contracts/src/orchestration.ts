@@ -1398,9 +1398,11 @@ export const OrchestrationGetFullThreadDiffResult = ThreadTurnDiff;
 export type OrchestrationGetFullThreadDiffResult = typeof OrchestrationGetFullThreadDiffResult.Type;
 
 /**
- * Fetches the full persisted input of a tool call, addressed by the id of one
- * of the call's activities. Activity payloads shipped over the socket carry
- * only a capped preview; this is the expand-past-the-cap escape hatch.
+ * Fetches the full change of a file-change tool call as an assembled patch,
+ * addressed by the id of one of the call's activities. Activity payloads
+ * shipped over the socket carry only a capped preview; this is the
+ * expand-past-the-cap escape hatch. The server assembles the patch from
+ * whatever shape the provider persisted, so clients stay provider-agnostic.
  */
 export const OrchestrationGetToolCallInputInput = Schema.Struct({
   threadId: ThreadId,
@@ -1409,8 +1411,8 @@ export const OrchestrationGetToolCallInputInput = Schema.Struct({
 export type OrchestrationGetToolCallInputInput = typeof OrchestrationGetToolCallInputInput.Type;
 
 export const OrchestrationGetToolCallInputResult = Schema.Struct({
-  toolName: Schema.optionalKey(Schema.String),
-  input: Schema.Unknown,
+  path: Schema.optionalKey(Schema.String),
+  patch: Schema.String,
 });
 export type OrchestrationGetToolCallInputResult = typeof OrchestrationGetToolCallInputResult.Type;
 

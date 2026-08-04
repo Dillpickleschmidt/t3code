@@ -155,11 +155,12 @@ const FILE_CHANGE_PREVIEW_MAX_LINES = 12;
 const FILE_CHANGE_PREVIEW_MAX_CHARS = 2_000;
 const FILE_CHANGE_PREVIEW_EDIT_SIDE_MAX_LINES = 8;
 const FILE_CHANGE_PREVIEW_EDIT_SIDE_MAX_CHARS = 1_000;
+const FILE_CHANGE_FALLBACK_PATH = "file";
 
 interface CappedPreviewText {
   text: string;
   truncated: boolean;
-  totalLines: number;
+  hiddenLineCount: number;
 }
 
 function capPreviewText(value: string, maxLines: number, maxChars: number): CappedPreviewText {
@@ -170,7 +171,29 @@ function capPreviewText(value: string, maxLines: number, maxChars: number): Capp
     text = text.slice(0, maxChars);
     truncated = true;
   }
-  return { text, truncated, totalLines: lines.length };
+  return {
+    text,
+    truncated,
+    hiddenLineCount: lines.length - text.split("\n").length,
+  };
+}
+
+function splitPatchLines(text: string): string[] {
+  const normalized = text.endsWith("\n") ? text.slice(0, -1) : text;
+  return normalized.length === 0 ? [] : normalized.split("\n");
+}
+
+function buildUnifiedPatch(path: string, oldLines: string[], newLines: string[]): string {
+  const oldRange = oldLines.length === 0 ? "-0,0" : `-1,${oldLines.length}`;
+  const newRange = newLines.length === 0 ? "+0,0" : `+1,${newLines.length}`;
+  return [
+    `diff --git a/${path} b/${path}`,
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    `@@ ${oldRange} ${newRange} @@`,
+    ...oldLines.map((line) => `-${line}`),
+    ...newLines.map((line) => `+${line}`),
+  ].join("\n");
 }
 
 function wrapDiffWithFileHeader(path: string, diff: string): string {
@@ -182,21 +205,53 @@ function wrapDiffWithFileHeader(path: string, diff: string): string {
 }
 
 /**
- * Codex file changes carry no tool input: the app-server `fileChange` item is
- * `{ changes: [{ path, kind, diff }] }` with a per-file unified diff (see
- * `FileChangeThreadItem` in the generated app-server schema). The preview
- * ships the assembled patch, capped like the write/edit previews.
+ * The provider shapes a file change can arrive in. Clients never see these:
+ * every shape is assembled into one renderable patch server-side.
+ *
+ * - `write`/`edit` come from Claude-style tool inputs.
+ * - `patch` comes from Codex app-server `fileChange` items, which carry
+ *   per-file unified diffs in `item.changes[{ path, kind, diff }]` (see
+ *   `FileChangeThreadItem` in the generated app-server schema).
  */
-function projectPatchFileChangePreview(
-  data: Record<string, unknown>,
-): Record<string, unknown> | undefined {
+type FileChangeSource =
+  | { shape: "write"; path: string | null; content: string }
+  | { shape: "edit"; path: string | null; oldString: string | null; newString: string | null }
+  | { shape: "patch"; path: string | null; sections: string[] };
+
+function readFileChangeSource(data: Record<string, unknown>): FileChangeSource | undefined {
+  const input = asRecord(data.input);
+  if (input) {
+    const path =
+      asTrimmedString(input.file_path) ??
+      asTrimmedString(input.path) ??
+      asTrimmedString(input.filePath) ??
+      asTrimmedString(input.notebook_path);
+
+    const oldString = typeof input.old_string === "string" ? input.old_string : null;
+    const newString = typeof input.new_string === "string" ? input.new_string : null;
+    if (oldString !== null || newString !== null) {
+      return { shape: "edit", path, oldString, newString };
+    }
+
+    const content =
+      typeof input.content === "string"
+        ? input.content
+        : typeof input.new_source === "string"
+          ? input.new_source
+          : null;
+    if (content === null || content.length === 0) {
+      return undefined;
+    }
+    return { shape: "write", path, content };
+  }
+
   const item = asRecord(data.item);
   const changes = Array.isArray(item?.changes) ? item.changes : null;
   if (!changes) {
     return undefined;
   }
   const sections: string[] = [];
-  const paths: string[] = [];
+  let firstPath: string | null = null;
   for (const changeValue of changes) {
     const change = asRecord(changeValue);
     const path = asTrimmedString(change?.path);
@@ -204,96 +259,111 @@ function projectPatchFileChangePreview(
     if (!path || diff === null || diff.length === 0) {
       continue;
     }
-    paths.push(path);
+    firstPath ??= path;
     sections.push(wrapDiffWithFileHeader(path, diff));
   }
   if (sections.length === 0) {
     return undefined;
   }
-  const patchCap = capPreviewText(
-    sections.join("\n"),
-    FILE_CHANGE_PREVIEW_MAX_LINES,
-    FILE_CHANGE_PREVIEW_MAX_CHARS,
-  );
+  return { shape: "patch", path: firstPath, sections };
+}
+
+/**
+ * Assembles the full, uncapped patch for a file-change tool call. Used by
+ * `orchestration.getToolCallInput` when a client expands a capped preview.
+ */
+export function assembleFullFileChangePatch(
+  data: Record<string, unknown>,
+): { path?: string; patch: string } | undefined {
+  const source = readFileChangeSource(data);
+  if (!source) {
+    return undefined;
+  }
+  const path = source.path ?? FILE_CHANGE_FALLBACK_PATH;
+  const patch =
+    source.shape === "write"
+      ? buildUnifiedPatch(path, [], splitPatchLines(source.content))
+      : source.shape === "edit"
+        ? buildUnifiedPatch(
+            path,
+            splitPatchLines(source.oldString ?? ""),
+            splitPatchLines(source.newString ?? ""),
+          )
+        : source.sections.join("\n");
   return {
-    kind: "patch",
-    ...(paths[0] !== undefined ? { path: paths[0] } : {}),
-    patch: patchCap.text,
-    patchTotalLines: patchCap.totalLines,
-    truncated: patchCap.truncated,
+    ...(source.path !== null ? { path: source.path } : {}),
+    patch,
   };
 }
 
 /**
- * A bounded excerpt of a file-change tool call's input so clients can render
- * an inline diff preview without shipping whole files over the socket. The
- * `truncated` flag tells the client whether expanding needs a fetch of the
- * full persisted input.
+ * A bounded excerpt of a file-change tool call, pre-assembled into a
+ * renderable patch so clients stay provider-agnostic. `truncated` tells the
+ * client that expanding needs a fetch of the full patch; edit sides are
+ * capped independently so a large removal cannot push the addition out of
+ * the preview.
  */
 function projectFileChangePreview(
   data: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
-  const input = asRecord(data.input);
-  if (!input) {
-    return projectPatchFileChangePreview(data);
+  const source = readFileChangeSource(data);
+  if (!source) {
+    return undefined;
   }
-  const path =
-    asTrimmedString(input.file_path) ??
-    asTrimmedString(input.path) ??
-    asTrimmedString(input.filePath) ??
-    asTrimmedString(input.notebook_path);
+  const path = source.path ?? FILE_CHANGE_FALLBACK_PATH;
 
-  const oldString = typeof input.old_string === "string" ? input.old_string : null;
-  const newString = typeof input.new_string === "string" ? input.new_string : null;
-  if (oldString !== null || newString !== null) {
+  let patch: string;
+  let truncated: boolean;
+  let hiddenLineCount: number;
+  if (source.shape === "write") {
+    const cap = capPreviewText(
+      source.content,
+      FILE_CHANGE_PREVIEW_MAX_LINES,
+      FILE_CHANGE_PREVIEW_MAX_CHARS,
+    );
+    patch = buildUnifiedPatch(path, [], splitPatchLines(cap.text));
+    truncated = cap.truncated;
+    hiddenLineCount = cap.hiddenLineCount;
+  } else if (source.shape === "edit") {
     const oldCap =
-      oldString !== null
+      source.oldString !== null
         ? capPreviewText(
-            oldString,
+            source.oldString,
             FILE_CHANGE_PREVIEW_EDIT_SIDE_MAX_LINES,
             FILE_CHANGE_PREVIEW_EDIT_SIDE_MAX_CHARS,
           )
         : null;
     const newCap =
-      newString !== null
+      source.newString !== null
         ? capPreviewText(
-            newString,
+            source.newString,
             FILE_CHANGE_PREVIEW_EDIT_SIDE_MAX_LINES,
             FILE_CHANGE_PREVIEW_EDIT_SIDE_MAX_CHARS,
           )
         : null;
-    if (!oldCap && !newCap) {
-      return undefined;
-    }
-    return {
-      kind: "edit",
-      ...(path ? { path } : {}),
-      ...(oldCap ? { oldText: oldCap.text, oldTotalLines: oldCap.totalLines } : {}),
-      ...(newCap ? { newText: newCap.text, newTotalLines: newCap.totalLines } : {}),
-      truncated: (oldCap?.truncated ?? false) || (newCap?.truncated ?? false),
-    };
+    patch = buildUnifiedPatch(
+      path,
+      oldCap ? splitPatchLines(oldCap.text) : [],
+      newCap ? splitPatchLines(newCap.text) : [],
+    );
+    truncated = (oldCap?.truncated ?? false) || (newCap?.truncated ?? false);
+    hiddenLineCount = (oldCap?.hiddenLineCount ?? 0) + (newCap?.hiddenLineCount ?? 0);
+  } else {
+    const cap = capPreviewText(
+      source.sections.join("\n"),
+      FILE_CHANGE_PREVIEW_MAX_LINES,
+      FILE_CHANGE_PREVIEW_MAX_CHARS,
+    );
+    patch = cap.text;
+    truncated = cap.truncated;
+    hiddenLineCount = cap.hiddenLineCount;
   }
 
-  const content =
-    typeof input.content === "string"
-      ? input.content
-      : typeof input.new_source === "string"
-        ? input.new_source
-        : null;
-  if (content === null || content.length === 0) {
-    return undefined;
-  }
-  const contentCap = capPreviewText(
-    content,
-    FILE_CHANGE_PREVIEW_MAX_LINES,
-    FILE_CHANGE_PREVIEW_MAX_CHARS,
-  );
   return {
-    kind: "write",
-    ...(path ? { path } : {}),
-    newText: contentCap.text,
-    newTotalLines: contentCap.totalLines,
-    truncated: contentCap.truncated,
+    ...(source.path !== null ? { path: source.path } : {}),
+    patch,
+    hiddenLineCount,
+    truncated,
   };
 }
 

@@ -1878,8 +1878,15 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       });
       assert.isTrue(found._tag === "Some");
       assert.deepStrictEqual(found._tag === "Some" ? found.value : null, {
-        toolName: "Write",
-        input: { file_path: "src/full.ts", content: "full line 1\nfull line 2" },
+        path: "src/full.ts",
+        patch: [
+          "diff --git a/src/full.ts b/src/full.ts",
+          "--- a/src/full.ts",
+          "+++ b/src/full.ts",
+          "@@ -0,0 +1,2 @@",
+          "+full line 1",
+          "+full line 2",
+        ].join("\n"),
       });
 
       // Wrong thread id must not read another thread's activity.
@@ -1896,22 +1903,23 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       });
       assert.isTrue(noInput._tag === "None");
 
-      // Codex file changes have no `input`; the lifecycle item is returned so
-      // clients can assemble the full per-file diffs.
+      // Codex file changes have no `input`; the per-file diffs on the
+      // lifecycle item are assembled into the same patch form.
       const codexItem = yield* snapshotQuery.getToolCallInput({
         threadId: ThreadId.make("thread-tool-input"),
         activityId: "activity-codex-item",
       });
       assert.isTrue(codexItem._tag === "Some");
       assert.deepStrictEqual(codexItem._tag === "Some" ? codexItem.value : null, {
-        input: {
-          id: "item_9",
-          type: "fileChange",
-          status: "completed",
-          changes: [
-            { path: "src/app.ts", kind: { type: "update" }, diff: "@@ -1,1 +1,1 @@\n-a\n+b" },
-          ],
-        },
+        path: "src/app.ts",
+        patch: [
+          "diff --git a/src/app.ts b/src/app.ts",
+          "--- a/src/app.ts",
+          "+++ b/src/app.ts",
+          "@@ -1,1 +1,1 @@",
+          "-a",
+          "+b",
+        ].join("\n"),
       });
     }),
   );

@@ -1931,83 +1931,6 @@ const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation(
 // write, fetched on demand.
 // ---------------------------------------------------------------------------
 
-function splitPreviewLines(text: string | undefined): string[] {
-  if (text === undefined || text.length === 0) {
-    return [];
-  }
-  const normalized = text.endsWith("\n") ? text.slice(0, -1) : text;
-  return normalized.split("\n");
-}
-
-function buildFileChangePatch(path: string, oldLines: string[], newLines: string[]): string {
-  const oldRange = oldLines.length === 0 ? "-0,0" : `-1,${oldLines.length}`;
-  const newRange = newLines.length === 0 ? "+0,0" : `+1,${newLines.length}`;
-  return [
-    `diff --git a/${path} b/${path}`,
-    `--- a/${path}`,
-    `+++ b/${path}`,
-    `@@ ${oldRange} ${newRange} @@`,
-    ...oldLines.map((line) => `-${line}`),
-    ...newLines.map((line) => `+${line}`),
-  ].join("\n");
-}
-
-function fullTextsFromToolCallInput(input: unknown): { oldText?: string; newText?: string } | null {
-  if (input === null || typeof input !== "object" || Array.isArray(input)) {
-    return null;
-  }
-  const record = input as Record<string, unknown>;
-  const oldText = typeof record.old_string === "string" ? record.old_string : undefined;
-  const newText =
-    typeof record.new_string === "string"
-      ? record.new_string
-      : typeof record.content === "string"
-        ? record.content
-        : typeof record.new_source === "string"
-          ? record.new_source
-          : undefined;
-  if (oldText === undefined && newText === undefined) {
-    return null;
-  }
-  return {
-    ...(oldText !== undefined ? { oldText } : {}),
-    ...(newText !== undefined ? { newText } : {}),
-  };
-}
-
-/**
- * Assembles a Codex `fileChange` item (`{ changes: [{ path, diff }] }`, per
- * the app-server protocol) into one renderable patch, mirroring the wrapping
- * the server does for the capped preview.
- */
-function fullPatchFromToolCallInput(input: unknown): string | null {
-  if (input === null || typeof input !== "object" || Array.isArray(input)) {
-    return null;
-  }
-  const changes = (input as Record<string, unknown>).changes;
-  if (!Array.isArray(changes)) {
-    return null;
-  }
-  const sections: string[] = [];
-  for (const changeValue of changes) {
-    if (changeValue === null || typeof changeValue !== "object") {
-      continue;
-    }
-    const change = changeValue as Record<string, unknown>;
-    const path = typeof change.path === "string" ? change.path.trim() : "";
-    const diff = typeof change.diff === "string" ? change.diff.replace(/\n+$/u, "") : "";
-    if (path.length === 0 || diff.length === 0) {
-      continue;
-    }
-    sections.push(
-      diff.startsWith("diff --git") || diff.startsWith("--- ")
-        ? diff
-        : [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, diff].join("\n"),
-    );
-  }
-  return sections.length > 0 ? sections.join("\n") : null;
-}
-
 const WorkEntryFilePreview = memo(function WorkEntryFilePreview(props: {
   workEntry: TimelineWorkEntry;
   preview: WorkLogFilePreview;
@@ -2025,22 +1948,7 @@ const WorkEntryFilePreview = memo(function WorkEntryFilePreview(props: {
         })
       : null;
   const fullInputQuery = useEnvironmentQuery(fullInputAtom);
-  const isPatchPreview = preview.kind === "patch";
-  const fullTexts =
-    needsFullInput && !isPatchPreview
-      ? fullTextsFromToolCallInput(fullInputQuery.data?.input)
-      : null;
-  const fullPatch =
-    needsFullInput && isPatchPreview
-      ? fullPatchFromToolCallInput(fullInputQuery.data?.input)
-      : null;
-
-  const previewOldLines = splitPreviewLines(preview.oldText);
-  const previewNewLines = splitPreviewLines(preview.newText);
-  const oldLines =
-    fullTexts?.oldText !== undefined ? splitPreviewLines(fullTexts.oldText) : previewOldLines;
-  const newLines =
-    fullTexts?.newText !== undefined ? splitPreviewLines(fullTexts.newText) : previewNewLines;
+  const fullPatch = needsFullInput ? (fullInputQuery.data?.patch ?? null) : null;
   const filePath = preview.path ?? workEntry.changedFiles?.[0] ?? "file";
 
   // Previews render fully highlighted regardless of turn age: turn folds
@@ -2050,21 +1958,13 @@ const WorkEntryFilePreview = memo(function WorkEntryFilePreview(props: {
   // Memoized on the patch string: FileDiff detects content changes by object
   // identity, so a fresh parse per render would tear down and rebuild the
   // diff DOM on every expand/collapse toggle of otherwise-identical content.
-  const patch = isPatchPreview
-    ? (fullPatch ?? preview.patch ?? "")
-    : buildFileChangePatch(filePath, oldLines, newLines);
+  const patch = fullPatch ?? preview.patch;
   const renderablePatch = useMemo(
     () => getRenderablePatch(patch, `tool-preview:${ctx.resolvedTheme}`),
     [patch, ctx.resolvedTheme],
   );
 
-  const previewPatchLines = isPatchPreview ? splitPreviewLines(preview.patch).length : 0;
-  const hiddenLineCount = expanded
-    ? 0
-    : isPatchPreview
-      ? Math.max(0, (preview.patchTotalLines ?? previewPatchLines) - previewPatchLines)
-      : Math.max(0, (preview.oldTotalLines ?? previewOldLines.length) - previewOldLines.length) +
-        Math.max(0, (preview.newTotalLines ?? previewNewLines.length) - previewNewLines.length);
+  const hiddenLineCount = expanded ? 0 : preview.hiddenLineCount;
 
   const handleOpenFile = () =>
     openDiffFilePrimaryAction({
@@ -2127,10 +2027,10 @@ const WorkEntryFilePreview = memo(function WorkEntryFilePreview(props: {
           {hiddenLineCount > 0 ? `+${hiddenLineCount.toLocaleString()} more lines` : "Truncated"}
         </div>
       ) : null}
-      {needsFullInput && fullTexts === null && fullInputQuery.isPending ? (
+      {needsFullInput && fullPatch === null && fullInputQuery.isPending ? (
         <div className="mt-0.5 text-[10px] text-muted-foreground/60">Loading full diff…</div>
       ) : null}
-      {needsFullInput && fullTexts === null && fullInputQuery.error !== null ? (
+      {needsFullInput && fullPatch === null && fullInputQuery.error !== null ? (
         <div className="mt-0.5 text-[10px] text-muted-foreground/60">
           Couldn't load the full diff — showing the capped preview.
         </div>
