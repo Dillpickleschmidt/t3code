@@ -1975,6 +1975,39 @@ function fullTextsFromToolCallInput(input: unknown): { oldText?: string; newText
   };
 }
 
+/**
+ * Assembles a Codex `fileChange` item (`{ changes: [{ path, diff }] }`, per
+ * the app-server protocol) into one renderable patch, mirroring the wrapping
+ * the server does for the capped preview.
+ */
+function fullPatchFromToolCallInput(input: unknown): string | null {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) {
+    return null;
+  }
+  const changes = (input as Record<string, unknown>).changes;
+  if (!Array.isArray(changes)) {
+    return null;
+  }
+  const sections: string[] = [];
+  for (const changeValue of changes) {
+    if (changeValue === null || typeof changeValue !== "object") {
+      continue;
+    }
+    const change = changeValue as Record<string, unknown>;
+    const path = typeof change.path === "string" ? change.path.trim() : "";
+    const diff = typeof change.diff === "string" ? change.diff.replace(/\n+$/u, "") : "";
+    if (path.length === 0 || diff.length === 0) {
+      continue;
+    }
+    sections.push(
+      diff.startsWith("diff --git") || diff.startsWith("--- ")
+        ? diff
+        : [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, diff].join("\n"),
+    );
+  }
+  return sections.length > 0 ? sections.join("\n") : null;
+}
+
 const WorkEntryFilePreview = memo(function WorkEntryFilePreview(props: {
   workEntry: TimelineWorkEntry;
   preview: WorkLogFilePreview;
@@ -1992,7 +2025,15 @@ const WorkEntryFilePreview = memo(function WorkEntryFilePreview(props: {
         })
       : null;
   const fullInputQuery = useEnvironmentQuery(fullInputAtom);
-  const fullTexts = needsFullInput ? fullTextsFromToolCallInput(fullInputQuery.data?.input) : null;
+  const isPatchPreview = preview.kind === "patch";
+  const fullTexts =
+    needsFullInput && !isPatchPreview
+      ? fullTextsFromToolCallInput(fullInputQuery.data?.input)
+      : null;
+  const fullPatch =
+    needsFullInput && isPatchPreview
+      ? fullPatchFromToolCallInput(fullInputQuery.data?.input)
+      : null;
 
   const previewOldLines = splitPreviewLines(preview.oldText);
   const previewNewLines = splitPreviewLines(preview.newText);
@@ -2009,16 +2050,21 @@ const WorkEntryFilePreview = memo(function WorkEntryFilePreview(props: {
   // Memoized on the patch string: FileDiff detects content changes by object
   // identity, so a fresh parse per render would tear down and rebuild the
   // diff DOM on every expand/collapse toggle of otherwise-identical content.
-  const patch = buildFileChangePatch(filePath, oldLines, newLines);
+  const patch = isPatchPreview
+    ? (fullPatch ?? preview.patch ?? "")
+    : buildFileChangePatch(filePath, oldLines, newLines);
   const renderablePatch = useMemo(
     () => getRenderablePatch(patch, `tool-preview:${ctx.resolvedTheme}`),
     [patch, ctx.resolvedTheme],
   );
 
+  const previewPatchLines = isPatchPreview ? splitPreviewLines(preview.patch).length : 0;
   const hiddenLineCount = expanded
     ? 0
-    : Math.max(0, (preview.oldTotalLines ?? previewOldLines.length) - previewOldLines.length) +
-      Math.max(0, (preview.newTotalLines ?? previewNewLines.length) - previewNewLines.length);
+    : isPatchPreview
+      ? Math.max(0, (preview.patchTotalLines ?? previewPatchLines) - previewPatchLines)
+      : Math.max(0, (preview.oldTotalLines ?? previewOldLines.length) - previewOldLines.length) +
+        Math.max(0, (preview.newTotalLines ?? previewNewLines.length) - previewNewLines.length);
 
   const handleOpenFile = () =>
     openDiffFilePrimaryAction({

@@ -666,6 +666,41 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("+16 more lines");
   });
 
+  it("renders capped Codex patch previews collapsed with the highlighted diff and a chip", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "work",
+            createdAt: "2026-03-17T19:10:00.000Z",
+            entry: {
+              id: "work-codex",
+              createdAt: "2026-03-17T19:10:00.000Z",
+              turnId: null,
+              label: "File change",
+              tone: "tool",
+              itemType: "file_change",
+              toolLifecycleStatus: "completed",
+              filePreview: {
+                kind: "patch",
+                path: "src/app.ts",
+                patch:
+                  "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1,1 +1,1 @@\n-a\n+b",
+                patchTotalLines: 26,
+                truncated: true,
+              },
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain('data-testid="file-diff"');
+    expect(markup).toContain("+20 more lines");
+  });
+
   it("starts uncapped file-change previews expanded with no more-lines chip", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline

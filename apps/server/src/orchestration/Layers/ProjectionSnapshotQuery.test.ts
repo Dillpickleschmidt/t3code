@@ -1858,6 +1858,17 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             '{"state":"completed"}',
             '2026-05-01T00:00:06.000Z',
             2
+          ),
+          (
+            'activity-codex-item',
+            'thread-tool-input',
+            'turn-tool-input',
+            'tool',
+            'tool.completed',
+            'File change',
+            '{"itemType":"file_change","status":"completed","data":{"toolCallId":"item_9","item":{"id":"item_9","type":"fileChange","status":"completed","changes":[{"path":"src/app.ts","kind":{"type":"update"},"diff":"@@ -1,1 +1,1 @@\\n-a\\n+b"}]}}}',
+            '2026-05-01T00:00:07.000Z',
+            3
           )
       `;
 
@@ -1884,6 +1895,24 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         activityId: "activity-no-input",
       });
       assert.isTrue(noInput._tag === "None");
+
+      // Codex file changes have no `input`; the lifecycle item is returned so
+      // clients can assemble the full per-file diffs.
+      const codexItem = yield* snapshotQuery.getToolCallInput({
+        threadId: ThreadId.make("thread-tool-input"),
+        activityId: "activity-codex-item",
+      });
+      assert.isTrue(codexItem._tag === "Some");
+      assert.deepStrictEqual(codexItem._tag === "Some" ? codexItem.value : null, {
+        input: {
+          id: "item_9",
+          type: "fileChange",
+          status: "completed",
+          changes: [
+            { path: "src/app.ts", kind: { type: "update" }, diff: "@@ -1,1 +1,1 @@\n-a\n+b" },
+          ],
+        },
+      });
     }),
   );
 });

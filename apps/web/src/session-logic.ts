@@ -61,18 +61,22 @@ export type WorkLogToolLifecycleStatus =
   | "stopped";
 
 /**
- * Server-capped excerpt of a file-change tool call's input, shipped in the
- * activity payload so the timeline can render an inline diff preview.
- * `truncated` means the full input exceeds the cap and needs a fetch
+ * Server-capped excerpt of a file-change tool call, shipped in the activity
+ * payload so the timeline can render an inline diff preview. Claude-style
+ * tools produce `write`/`edit` previews from the tool input; Codex file
+ * changes produce a `patch` preview carrying an assembled unified diff.
+ * `truncated` means the full change exceeds the cap and needs a fetch
  * (`orchestration.getToolCallInput`) to display in full.
  */
 export interface WorkLogFilePreview {
-  kind: "write" | "edit";
+  kind: "write" | "edit" | "patch";
   path?: string;
   oldText?: string;
   newText?: string;
   oldTotalLines?: number;
   newTotalLines?: number;
+  patch?: string;
+  patchTotalLines?: number;
   truncated: boolean;
 }
 
@@ -897,15 +901,23 @@ function extractFilePreview(
   if (!preview) {
     return undefined;
   }
-  const kind = preview.kind === "write" || preview.kind === "edit" ? preview.kind : null;
+  const kind =
+    preview.kind === "write" || preview.kind === "edit" || preview.kind === "patch"
+      ? preview.kind
+      : null;
   const oldText = typeof preview.oldText === "string" ? preview.oldText : undefined;
   const newText = typeof preview.newText === "string" ? preview.newText : undefined;
-  if (!kind || (oldText === undefined && newText === undefined)) {
+  const patch = typeof preview.patch === "string" ? preview.patch : undefined;
+  if (
+    !kind ||
+    (kind === "patch" ? patch === undefined : oldText === undefined && newText === undefined)
+  ) {
     return undefined;
   }
   const path = asTrimmedString(preview.path);
   const oldTotalLines = asNumber(preview.oldTotalLines);
   const newTotalLines = asNumber(preview.newTotalLines);
+  const patchTotalLines = asNumber(preview.patchTotalLines);
   return {
     kind,
     ...(path !== null ? { path } : {}),
@@ -913,6 +925,8 @@ function extractFilePreview(
     ...(newText !== undefined ? { newText } : {}),
     ...(oldTotalLines !== null ? { oldTotalLines } : {}),
     ...(newTotalLines !== null ? { newTotalLines } : {}),
+    ...(patch !== undefined ? { patch } : {}),
+    ...(patchTotalLines !== null ? { patchTotalLines } : {}),
     truncated: preview.truncated === true,
   };
 }

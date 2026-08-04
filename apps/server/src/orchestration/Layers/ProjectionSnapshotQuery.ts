@@ -2296,12 +2296,15 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         Option.flatMap((row) => {
           const payload = asRecordOrNull(row.payload);
           const data = asRecordOrNull(payload?.data);
-          if (!data || data.input === undefined) {
+          // Claude-style tools persist their input; Codex file changes carry
+          // the full per-file diffs on the lifecycle item instead.
+          const input = data?.input !== undefined ? data.input : asRecordOrNull(data?.item);
+          if (!data || input === undefined || input === null) {
             return Option.none();
           }
           return Option.some({
             ...(typeof data.toolName === "string" ? { toolName: data.toolName } : {}),
-            input: data.input,
+            input,
           });
         }),
       ),

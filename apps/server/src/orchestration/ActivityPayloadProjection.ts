@@ -173,6 +173,57 @@ function capPreviewText(value: string, maxLines: number, maxChars: number): Capp
   return { text, truncated, totalLines: lines.length };
 }
 
+function wrapDiffWithFileHeader(path: string, diff: string): string {
+  const trimmed = diff.replace(/\n+$/u, "");
+  if (trimmed.startsWith("diff --git") || trimmed.startsWith("--- ")) {
+    return trimmed;
+  }
+  return [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, trimmed].join("\n");
+}
+
+/**
+ * Codex file changes carry no tool input: the app-server `fileChange` item is
+ * `{ changes: [{ path, kind, diff }] }` with a per-file unified diff (see
+ * `FileChangeThreadItem` in the generated app-server schema). The preview
+ * ships the assembled patch, capped like the write/edit previews.
+ */
+function projectPatchFileChangePreview(
+  data: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const item = asRecord(data.item);
+  const changes = Array.isArray(item?.changes) ? item.changes : null;
+  if (!changes) {
+    return undefined;
+  }
+  const sections: string[] = [];
+  const paths: string[] = [];
+  for (const changeValue of changes) {
+    const change = asRecord(changeValue);
+    const path = asTrimmedString(change?.path);
+    const diff = typeof change?.diff === "string" ? change.diff : null;
+    if (!path || diff === null || diff.length === 0) {
+      continue;
+    }
+    paths.push(path);
+    sections.push(wrapDiffWithFileHeader(path, diff));
+  }
+  if (sections.length === 0) {
+    return undefined;
+  }
+  const patchCap = capPreviewText(
+    sections.join("\n"),
+    FILE_CHANGE_PREVIEW_MAX_LINES,
+    FILE_CHANGE_PREVIEW_MAX_CHARS,
+  );
+  return {
+    kind: "patch",
+    ...(paths[0] !== undefined ? { path: paths[0] } : {}),
+    patch: patchCap.text,
+    patchTotalLines: patchCap.totalLines,
+    truncated: patchCap.truncated,
+  };
+}
+
 /**
  * A bounded excerpt of a file-change tool call's input so clients can render
  * an inline diff preview without shipping whole files over the socket. The
@@ -184,7 +235,7 @@ function projectFileChangePreview(
 ): Record<string, unknown> | undefined {
   const input = asRecord(data.input);
   if (!input) {
-    return undefined;
+    return projectPatchFileChangePreview(data);
   }
   const path =
     asTrimmedString(input.file_path) ??

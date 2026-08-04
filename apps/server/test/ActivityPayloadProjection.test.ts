@@ -328,6 +328,55 @@ describe("file-change preview", () => {
     ).toMatchObject({ kind: "write", truncated: false });
   });
 
+  it("assembles a capped patch preview for Codex file changes", () => {
+    // Shape per the Codex app-server protocol (`FileChangeThreadItem`):
+    // the adapter persists the notification payload verbatim, so `data.item`
+    // carries `changes: [{ path, kind, diff }]` with per-file unified diffs.
+    const longDiff = Array.from({ length: 20 }, (_, index) => `+added line ${index + 1}`).join(
+      "\n",
+    );
+    const activity = makeFileChangeActivity("codex-patch", "tool.completed", {
+      toolCallId: "item_3",
+      item: {
+        id: "item_3",
+        type: "fileChange",
+        status: "completed",
+        changes: [
+          {
+            path: "src/app.ts",
+            kind: { type: "update", move_path: null },
+            diff: `@@ -1,1 +1,20 @@\n-old line\n${longDiff}`,
+          },
+          {
+            path: "src/other.ts",
+            kind: { type: "add" },
+            diff: "@@ -0,0 +1,1 @@\n+new file line",
+          },
+        ],
+      },
+    });
+
+    const preview = projectedPreview(activity) as {
+      kind: string;
+      path: string;
+      patch: string;
+      patchTotalLines: number;
+      truncated: boolean;
+    };
+    expect(preview).toMatchObject({
+      kind: "patch",
+      path: "src/app.ts",
+      truncated: true,
+    });
+    expect(preview.patch.startsWith("diff --git a/src/app.ts b/src/app.ts")).toBe(true);
+    expect(preview.patch.split("\n")).toHaveLength(12);
+    // File one: 3 header lines + 22 diff lines; file two: 3 + 2.
+    expect(preview.patchTotalLines).toBe(30);
+
+    const entries = deriveWorkLogEntries([projectActivityPayload(activity)]);
+    expect(entries[0]?.filePreview).toMatchObject({ kind: "patch", truncated: true });
+  });
+
   it("keeps the preview only on the newest snapshot activity per tool call", () => {
     const call = (id: string, kind: "tool.updated" | "tool.completed", content: string) =>
       makeFileChangeActivity(id, kind, {
