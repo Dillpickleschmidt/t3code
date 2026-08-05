@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./citymapLayout": {
+      "types": "./src/citymapLayout.ts",
+      "import": "./src/citymapLayout.ts"
+    },
     "./projectFavicon": {
       "types": "./src/projectFavicon.ts",
       "import": "./src/projectFavicon.ts"

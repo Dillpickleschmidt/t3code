@@ -35,6 +35,9 @@ interface CitySceneProps {
   playback: FilePlayback;
   selectedPath?: string;
   onSelect: (path?: string) => void;
+  /** Right-click. When set, the browser context menu is suppressed on the
+   * canvas so the stage owns both buttons. */
+  onSecondarySelect?: (path?: string) => void;
   onCanvasReady?: (canvas: HTMLCanvasElement | null) => void;
   /** Second line of the hover readout. Defaults to the walk's own vocabulary
    * ("read · 3 visits"), which is a lie on a surface that isn't a walk. */
@@ -81,6 +84,7 @@ export function CityScene({
   playback,
   selectedPath,
   onSelect,
+  onSecondarySelect,
   onCanvasReady,
   hoverMeta,
   playing = false,
@@ -116,6 +120,9 @@ export function CityScene({
   playbackRef.current = playback;
   const hoverMetaRef = useRef(hoverMeta);
   hoverMetaRef.current = hoverMeta;
+  // read through a ref so a new callback identity does not rebuild the stage
+  const onSecondarySelectRef = useRef(onSecondarySelect);
+  onSecondarySelectRef.current = onSecondarySelect;
   const playingRef = useRef(playing);
   playingRef.current = playing;
   const tallestColumnRef = useRef(tallestColumn);
@@ -249,16 +256,28 @@ export function CityScene({
       return filesRef.current[hit.instanceId];
     };
 
-    let downAt: { x: number; y: number } | null = null;
+    let downAt: { x: number; y: number; button: number } | null = null;
     const onPointerDown = (event: PointerEvent) => {
-      downAt = { x: event.clientX, y: event.clientY };
+      downAt = { x: event.clientX, y: event.clientY, button: event.button };
     };
     const onPointerUp = (event: PointerEvent) => {
-      if (!downAt) return;
+      if (!downAt || event.button !== downAt.button) {
+        downAt = null;
+        return;
+      }
+      const { button } = downAt;
       const moved = Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y);
       downAt = null;
+      // a drag is camera movement on either button, never a selection
       if (moved > 5) return;
-      onSelect(pickFile(event)?.path);
+      if (button === 0) {
+        onSelect(pickFile(event)?.path);
+      } else if (button === 2) {
+        onSecondarySelectRef.current?.(pickFile(event)?.path);
+      }
+    };
+    const onContextMenu = (event: Event) => {
+      if (onSecondarySelectRef.current) event.preventDefault();
     };
     // hover: cursor + one-line readout, throttled to one raycast per frame
     let hoverRaf = 0;
@@ -288,6 +307,7 @@ export function CityScene({
     renderer.domElement.addEventListener("pointerup", onPointerUp);
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerleave", onPointerLeave);
+    renderer.domElement.addEventListener("contextmenu", onContextMenu);
 
     const resize = () => {
       if (!hostRef.current) return;
@@ -355,6 +375,7 @@ export function CityScene({
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerleave", onPointerLeave);
+      renderer.domElement.removeEventListener("contextmenu", onContextMenu);
       tip.dispose();
       observer.disconnect();
       controls.dispose();

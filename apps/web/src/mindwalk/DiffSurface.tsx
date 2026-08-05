@@ -1,4 +1,5 @@
 import type { DiffOverlay, ScopedThreadRef } from "@t3tools/contracts";
+import { buildCitymap } from "@t3tools/shared/citymapLayout";
 import { useAtomValue } from "@effect/atom-react";
 import * as Effect from "effect/Effect";
 import { ChevronDownIcon } from "lucide-react";
@@ -17,6 +18,7 @@ import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "~/compon
 import { useTheme } from "~/hooks/useTheme";
 import { openDiffFilePrimaryAction } from "../diffFileActions";
 import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelStore";
+import { useRightPanelStore } from "../rightPanelStore";
 import { resolveDiffScope } from "../diffScope";
 import { useOpenInPreferredEditor } from "../editorPreferences";
 import { useCheckpointDiff } from "../lib/checkpointDiffState";
@@ -133,14 +135,30 @@ export default function DiffSurface({
   );
   const environmentCwd = serverConfig?.cwd;
 
-  // Clicking a column fires the 2D panel's own file-row action rather than a
-  // second spelling of it. No selection state: the click navigates to the
-  // file's tab, so there is no stage left to highlight.
   const openInPreferredEditor = useOpenInPreferredEditor(
     threadRef?.environmentId ?? null,
     serverConfig?.availableEditors ?? [],
   );
-  const openColumn = useCallback(
+  // Left-click: the 2D panel at this scope, focused on the file. Right-click:
+  // the live file view. Scope read through a ref so the callback identity
+  // stays stable — a new identity rebuilds the whole stage.
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  const openColumnDiff = useCallback(
+    (path?: string) => {
+      if (!path || !threadRef) return;
+      const current = scopeRef.current;
+      const store = useDiffPanelStore.getState();
+      if (current.kind === "turn" && current.turn) {
+        store.selectTurn(threadRef, current.turn.turnId, path);
+      } else {
+        store.selectGitScope(threadRef, current.kind === "unstaged" ? "unstaged" : "branch", path);
+      }
+      useRightPanelStore.getState().open(threadRef, "diff");
+    },
+    [threadRef],
+  );
+  const openColumnFile = useCallback(
     (path?: string) => {
       if (!path) return;
       openDiffFilePrimaryAction({
@@ -326,7 +344,30 @@ export default function DiffSurface({
     drillStep,
   ]);
 
-  const city = overlay?.citymap as CityMap | undefined;
+  // Rebuilt per scope: the end-state tree plus a ghost for each path this
+  // scope's own diff touched that no longer exists. The server's ghost set
+  // (a fixed commit window unrelated to the scope) is discarded.
+  const city = useMemo((): CityMap | undefined => {
+    const base = overlay?.citymap as CityMap | undefined;
+    if (!base) return undefined;
+    const treeFiles = base.files.filter((file) => !file.ghost);
+    const onMap = new Set(treeFiles.map((file) => file.path));
+    const ghostPaths = [...frame.churnByPath.keys()].filter((path) => !onMap.has(path));
+    return buildCitymap({
+      root: base.repo.root,
+      commit: base.repo.commit ?? null,
+      dirty: base.repo.dirty,
+      generatedAt: base.repo.generatedAt,
+      files: treeFiles.map(({ path, dir, lines, bytes, lang }) => ({
+        path,
+        dir,
+        lines,
+        bytes,
+        lang: lang ?? "",
+      })),
+      ghostPaths,
+    }) as CityMap;
+  }, [overlay, frame.churnByPath]);
 
   const columns = useMemo(
     () => (city ? diffColumns(city, frame.churnByPath, scenePalette) : []),
@@ -344,26 +385,6 @@ export default function DiffSurface({
     }
     return { additions, deletions, files: frame.churnByPath.size };
   }, [frame.churnByPath]);
-
-  /**
-   * Files this frame changed that the citymap has no building for.
-   *
-   * The standing rule is to check that two data sources agree on their
-   * vocabulary rather than assume it, and this is that check made visible
-   * instead of silent. It should read zero on the repository scopes, whose
-   * deleted files the endpoint raises as ghosts. The turn scopes are the
-   * honest exception: their ghosts would have to come from the same endpoint,
-   * which is keyed by working directory and knows nothing about this thread,
-   * so a file a turn *deleted* has nowhere to stand. Saying so beats drawing a
-   * frame that quietly omits it.
-   */
-  const offMapFiles = useMemo(() => {
-    if (!city || frame.churnByPath.size === 0) return 0;
-    const onMap = new Set(city.files.map((file) => file.path));
-    let missing = 0;
-    for (const path of frame.churnByPath.keys()) if (!onMap.has(path)) missing += 1;
-    return missing;
-  }, [city, frame.churnByPath]);
 
   const hoverMeta = useMemo(
     () => (file: CityFile) => {
@@ -404,7 +425,8 @@ export default function DiffSurface({
                 columns={columns}
                 playback={NO_WALK}
                 hoverMeta={hoverMeta}
-                onSelect={openColumn}
+                onSelect={openColumnDiff}
+                onSecondarySelect={openColumnFile}
                 playing={playing}
                 tallestColumn={tallestColumn}
                 palette={scenePalette}
@@ -501,9 +523,6 @@ export default function DiffSurface({
                     </span>
                     <span className="text-[var(--mw-diff-added)]">+{totals.additions}</span>
                     <span className="text-[var(--mw-diff-removed)]">−{totals.deletions}</span>
-                    {offMapFiles > 0 ? (
-                      <span className="text-muted-foreground/70">{offMapFiles} not on the map</span>
-                    ) : null}
                   </div>
                   {frame.notice ? (
                     <div className="mt-1 text-muted-foreground text-xs">{frame.notice}</div>

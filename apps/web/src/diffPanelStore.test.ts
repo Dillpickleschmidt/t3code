@@ -12,13 +12,13 @@ describe("diffPanelStore", () => {
   it("defaults each thread to branch changes when the working tree is clean", () => {
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
-    ).toEqual({ kind: "branch", baseRef: null });
+    ).toMatchObject({ kind: "branch", baseRef: null });
   });
 
   it("defaults each thread to working changes when the working tree is dirty", () => {
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF, true),
-    ).toEqual({ kind: "unstaged" });
+    ).toMatchObject({ kind: "unstaged" });
   });
 
   it("preserves an explicit scope selection when the working tree state changes", () => {
@@ -26,7 +26,7 @@ describe("diffPanelStore", () => {
 
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF, true),
-    ).toEqual({ kind: "branch", baseRef: null });
+    ).toMatchObject({ kind: "branch", baseRef: null });
   });
 
   it("clears incompatible selection fields when changing scopes", () => {
@@ -36,12 +36,12 @@ describe("diffPanelStore", () => {
 
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
-    ).toEqual({ kind: "unstaged" });
+    ).toMatchObject({ kind: "unstaged" });
 
     useDiffPanelStore.getState().selectBranchBaseRef(THREAD_REF, " origin/main ");
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
-    ).toEqual({ kind: "branch", baseRef: "origin/main" });
+    ).toMatchObject({ kind: "branch", baseRef: "origin/main" });
   });
 
   it("increments the reveal request when opening the same turn file again", () => {
@@ -61,7 +61,7 @@ describe("diffPanelStore", () => {
 
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
-    ).toEqual({ kind: "branch", baseRef: "origin/main" });
+    ).toMatchObject({ kind: "branch", baseRef: "origin/main" });
   });
 
   it("reconciles a missing turn selection to the latest available turn", () => {
@@ -78,5 +78,16 @@ describe("diffPanelStore", () => {
       filePath: "src/app.ts",
       revealRequestId: 1,
     });
+  });
+  it("focuses a file on a git scope and bumps the reveal request", () => {
+    useDiffPanelStore.getState().selectGitScope(THREAD_REF, "unstaged", "src/app.ts");
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
+    ).toMatchObject({ kind: "unstaged", filePath: "src/app.ts", revealRequestId: 1 });
+
+    useDiffPanelStore.getState().selectGitScope(THREAD_REF, "unstaged", "src/app.ts");
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
+    ).toMatchObject({ filePath: "src/app.ts", revealRequestId: 2 });
   });
 });

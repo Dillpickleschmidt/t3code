@@ -44,10 +44,17 @@ describe("orderTurnDiffSummaries", () => {
 
 describe("resolveDiffScope", () => {
   it("names the two repository scopes the way the 2D panel's menu does", () => {
-    expect(resolveDiffScope({ kind: "unstaged" }, ordered, counts).label).toBe("Working tree");
-    expect(resolveDiffScope({ kind: "branch", baseRef: null }, ordered, counts).label).toBe(
-      "Branch changes",
-    );
+    expect(
+      resolveDiffScope({ kind: "unstaged", filePath: null, revealRequestId: 0 }, ordered, counts)
+        .label,
+    ).toBe("Working tree");
+    expect(
+      resolveDiffScope(
+        { kind: "branch", baseRef: null, filePath: null, revealRequestId: 0 },
+        ordered,
+        counts,
+      ).label,
+    ).toBe("Branch changes");
   });
 
   it("calls the newest turn latest, and any other by its number", () => {

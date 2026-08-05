@@ -261,9 +261,8 @@ export default function DiffPanel({
   const selectedTurnId = diffSelection.kind === "turn" ? diffSelection.turnId : null;
   const selectedGitScope = diffSelection.kind === "unstaged" ? "unstaged" : "branch";
   const selectedBaseRef = diffSelection.kind === "branch" ? diffSelection.baseRef : null;
-  const selectedFilePath = diffSelection.kind === "turn" ? diffSelection.filePath : null;
-  const selectedFileRevealRequestId =
-    diffSelection.kind === "turn" ? diffSelection.revealRequestId : 0;
+  const selectedFilePath = diffSelection.filePath;
+  const selectedFileRevealRequestId = diffSelection.revealRequestId;
   // Resolved by `diffScope`, which 3D Diff reads the same selection through —
   // one reading of the store, so the two panels cannot name a scope differently.
   const resolvedScope = resolveDiffScope(
@@ -410,12 +409,26 @@ export default function DiffPanel({
   const allDiffFilesCollapsed = areAllDiffFilesCollapsed(diffFileKeys, collapsedDiffFileKeys);
   const diffLineStat = useMemo(() => getDiffLineStat(renderableFiles), [renderableFiles]);
 
+  // Focusing a file collapses the rest once per reveal request, then leaves
+  // the user's own toggles alone.
+  const appliedFocusRevealRef = useRef(0);
   useEffect(() => {
     if (!selectedFilePath) return;
     const file = codeViewFiles.find((candidate) => candidate.filePath === selectedFilePath);
     if (!file) return;
+    if (appliedFocusRevealRef.current !== selectedFileRevealRequestId) {
+      appliedFocusRevealRef.current = selectedFileRevealRequestId;
+      setCollapsedDiffFiles({
+        scopeKey: collapseScopeKey,
+        fileKeys: new Set(
+          codeViewFiles
+            .filter((candidate) => candidate.fileKey !== file.fileKey)
+            .map((candidate) => candidate.fileKey),
+        ),
+      });
+    }
     codeViewRef.current?.scrollTo({ type: "item", id: file.fileKey, align: "start" });
-  }, [codeViewFiles, selectedFilePath, selectedFileRevealRequestId]);
+  }, [codeViewFiles, selectedFilePath, selectedFileRevealRequestId, collapseScopeKey]);
 
   const openDiffFile = useCallback(
     (filePath: string) => {
