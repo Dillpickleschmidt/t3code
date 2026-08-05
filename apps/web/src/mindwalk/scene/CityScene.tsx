@@ -16,7 +16,7 @@ import {
   SceneTip,
   touchColorsFor,
 } from "./sceneUtils";
-import { ATTRACT_DRIFT_MS, FrameLoop } from "./frameLoop";
+import { FrameLoop } from "./frameLoop";
 import { fireflyTexture } from "./textures";
 import { TrailRenderer } from "./trail";
 
@@ -199,29 +199,11 @@ export function CityScene({
     controls.enableDamping = !reduced;
     controls.dampingFactor = 0.08;
     controls.maxPolarAngle = Math.PI * 0.44;
-    // mindwalk drifts the god view slowly around the terrain until the user takes
-    // over. Perpetual drift on a parked, visible view is the case AGENTS.md
-    // names, so it is bounded rather than dropped: the arrival motion still
-    // plays, and stops at whichever comes first — the first interaction, which
-    // is mindwalk's own rule, or ATTRACT_DRIFT_MS. Reduced-motion users get no
-    // drift at all, as upstream.
-    controls.autoRotate = !reduced;
-    controls.autoRotateSpeed = -0.5;
-    let driftTimer: ReturnType<typeof setTimeout> | null = null;
-    const stopDrift = () => {
-      controls.autoRotate = false;
-      if (driftTimer !== null) {
-        clearTimeout(driftTimer);
-        driftTimer = null;
-      }
-    };
-    if (!reduced) driftTimer = setTimeout(stopDrift, ATTRACT_DRIFT_MS);
     const tip = new SceneTip(host);
     userTookCameraRef.current = false;
     controls.addEventListener("start", () => {
       userTookCameraRef.current = true;
       preSelectCameraRef.current = null;
-      stopDrift();
       tip.hide();
     });
     controlsRef.current = controls;
@@ -367,7 +349,6 @@ export function CityScene({
     controls.addEventListener("change", () => loop.invalidate());
 
     return () => {
-      stopDrift();
       loop.dispose();
       loopRef.current = null;
       if (hoverRaf) cancelAnimationFrame(hoverRaf);
