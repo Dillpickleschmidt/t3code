@@ -344,6 +344,29 @@ export default function DiffSurface({
     drillStep,
   ]);
 
+  // Every path this scope can reach, across all of its steps — not just the
+  // frame's. The city is the scope's map: keying it off the current frame
+  // rebuilt the stage (and re-fit the camera) on every scrub step, and hid a
+  // mid-range deletion's ghost on every step but its own.
+  const scopePaths = useMemo((): ReadonlySet<string> => {
+    const paths = new Set<string>();
+    const add = (span: ChurnSpan | null | undefined) => {
+      for (const [path] of span ? churnMapOf(span) : NO_FILES) paths.add(path);
+    };
+    switch (scope.kind) {
+      case "unstaged":
+        add(workingSource?.files);
+        break;
+      case "turn":
+        add(turnChurn);
+        break;
+      default:
+        for (const step of commitSteps) add(step.files);
+        add(branchSource?.files);
+    }
+    return paths;
+  }, [scope.kind, workingSource, turnChurn, commitSteps, branchSource]);
+
   // Rebuilt per scope: the end-state tree plus a ghost for each path this
   // scope's own diff touched that no longer exists. The server's ghost set
   // (a fixed commit window unrelated to the scope) is discarded.
@@ -352,7 +375,7 @@ export default function DiffSurface({
     if (!base) return undefined;
     const treeFiles = base.files.filter((file) => !file.ghost);
     const onMap = new Set(treeFiles.map((file) => file.path));
-    const ghostPaths = [...frame.churnByPath.keys()].filter((path) => !onMap.has(path));
+    const ghostPaths = [...scopePaths].filter((path) => !onMap.has(path));
     return buildCitymap({
       root: base.repo.root,
       commit: base.repo.commit ?? null,
@@ -367,7 +390,7 @@ export default function DiffSurface({
       })),
       ghostPaths,
     }) as CityMap;
-  }, [overlay, frame.churnByPath]);
+  }, [overlay, scopePaths]);
 
   const columns = useMemo(
     () => (city ? diffColumns(city, frame.churnByPath, scenePalette) : []),
