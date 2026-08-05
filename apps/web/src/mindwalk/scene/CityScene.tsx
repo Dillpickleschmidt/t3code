@@ -367,7 +367,7 @@ export function CityScene({
     };
   }, [onSelect, onCanvasReady, palette]);
 
-  // build the plain: ground, grid, district plates, flat file tiles
+  // build the plain: district plates, flat file tiles
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
@@ -379,20 +379,6 @@ export function CityScene({
 
     const group = new THREE.Group();
     const size = bounds.size;
-
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(size * 6, size * 6),
-      new THREE.MeshStandardMaterial({ color: palette.ground, roughness: 1 }),
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.32;
-    group.add(ground);
-
-    const grid = new THREE.GridHelper(size * 2.8, 46, palette.gridMajor, palette.gridMinor);
-    (grid.material as THREE.Material).transparent = true;
-    (grid.material as THREE.Material).opacity = 0.5;
-    grid.position.y = -0.3;
-    group.add(grid);
 
     const plateDirs = city.dirs.filter((dir) => dir.depth <= 3 && dir.rect.w > 0 && dir.rect.d > 0);
     if (plateDirs.length > 0) {

@@ -23,7 +23,7 @@ import * as THREE from "three";
  * backdrop is a no-op.
  *
  * So light mode inverts the metaphor too: a **daylight survey**, where ink is
- * data. Near-white ground, graphite masses, touch states as saturated ink.
+ * data. Near-white paper, graphite masses, touch states as saturated ink.
  * Hue is preserved exactly — hue is the meaning the legend promises — and only
  * lightness flips. The glow model flips with it: `AdditiveBlending` emits onto
  * darkness, `NormalBlending` absorbs onto paper. Both preserve the two
@@ -63,10 +63,6 @@ export interface ScenePalette {
      * brightest thing at night and the deepest thing by day. */
     readonly selected: string;
   };
-  /** The plain the map sits on, and the survey grid ruled over it. */
-  readonly ground: string;
-  readonly gridMajor: string;
-  readonly gridMinor: string;
   /**
    * Vertical shade baked into the attention columns, base → crest.
    *
@@ -172,9 +168,6 @@ const DARK: MindwalkPalette = {
       edit: "#f0ad5a",
       selected: "#f6ead2",
     },
-    ground: "#141414",
-    gridMajor: "#242424",
-    gridMinor: "#1c1c1c",
     columnShade: [0.34, 0.82],
     city: {
       unvisited: "#616161",
@@ -237,9 +230,6 @@ const LIGHT: MindwalkPalette = {
       edit: "#b4700f",
       selected: "#3c2c12",
     },
-    ground: "#fafafa",
-    gridMajor: "#e8e8e8",
-    gridMinor: "#f0f0f0",
     columnShade: [1, 1],
     city: {
       // unvisited sits just *below* the sky by day exactly as it sits just
@@ -302,7 +292,7 @@ export function paletteFor(theme: MindwalkTheme): MindwalkPalette {
  * Positions on T3's own neutral axis, as a percentage from `--background`
  * toward `--foreground`.
  *
- * Mindwalk's structural greys — the plain, the branches, unvisited and ghost
+ * Mindwalk's structural greys — the branches, unvisited and ghost
  * files — were a cool blue-grey family tuned against its navy sky. Against
  * T3's neutral surfaces they read as a foreign object, so they are expressed
  * as *distances* rather than colours: how far each thing sits from the
@@ -314,9 +304,6 @@ export function paletteFor(theme: MindwalkTheme): MindwalkPalette {
  * "more present" in either — it darkens on paper and lightens at night.
  */
 const STRUCTURE_MIX = {
-  ground: 3,
-  gridMinor: 6,
-  gridMajor: 10,
   dirShadeNear: 6,
   dirShadeFar: 12,
   cityGhost: 26,
@@ -405,9 +392,6 @@ export function resolveScenePalette(host: HTMLElement, theme: MindwalkTheme): Sc
 
     const sky = read("var(--background)");
     const labelInk = read("var(--muted-foreground)");
-    const ground = mix(STRUCTURE_MIX.ground);
-    const gridMajor = mix(STRUCTURE_MIX.gridMajor);
-    const gridMinor = mix(STRUCTURE_MIX.gridMinor);
     const unvisited = mix(STRUCTURE_MIX.unvisited);
     const cityGhost = mix(STRUCTURE_MIX.cityGhost);
     const treeGhost = mix(STRUCTURE_MIX.treeGhost);
@@ -422,9 +406,6 @@ export function resolveScenePalette(host: HTMLElement, theme: MindwalkTheme): Sc
     if (
       !sky ||
       !labelInk ||
-      !ground ||
-      !gridMajor ||
-      !gridMinor ||
       !unvisited ||
       !cityGhost ||
       !treeGhost ||
@@ -442,9 +423,6 @@ export function resolveScenePalette(host: HTMLElement, theme: MindwalkTheme): Sc
       ...fallback,
       sky,
       labelInk,
-      ground,
-      gridMajor,
-      gridMinor,
       city: {
         ...fallback.city,
         unvisited,
@@ -458,7 +436,6 @@ export function resolveScenePalette(host: HTMLElement, theme: MindwalkTheme): Sc
         dirShadeFar,
       },
       tree: { ...fallback.tree, unvisited, ghost: treeGhost, edgeBase, edgeLit },
-      // the hemisphere's lower half is bounce off the floor, which is the sky
       light: { ...fallback.light, hemiGround: sky },
     };
   } finally {

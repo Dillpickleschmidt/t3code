@@ -193,16 +193,6 @@ export function TreeScene({
     });
     controlsRef.current = controls;
 
-    const sky = new THREE.HemisphereLight(
-      palette.light.hemiSky,
-      palette.light.hemiGround,
-      palette.light.hemiIntensity,
-    );
-    scene.add(sky);
-    const moon = new THREE.DirectionalLight(palette.light.sunColor, palette.light.sunIntensity);
-    moon.position.set(-60, 120, -40);
-    scene.add(moon);
-
     // screen-space nearest-leaf picking: tiny orbs are hostile raycast
     // targets, so pick whatever leaf lands closest to the pointer
     const PICK_RADIUS = 18;
@@ -402,20 +392,6 @@ export function TreeScene({
 
     const group = new THREE.Group();
     const size = layout.radius * 2.3;
-
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(size * 6, size * 6),
-      new THREE.MeshStandardMaterial({ color: palette.ground, roughness: 1 }),
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.25;
-    group.add(ground);
-
-    const grid = new THREE.GridHelper(size * 2.4, 40, palette.gridMajor, palette.gridMinor);
-    (grid.material as THREE.Material).transparent = true;
-    (grid.material as THREE.Material).opacity = 0.4;
-    grid.position.y = -0.24;
-    group.add(grid);
 
     // branch skeleton, one segment soup with per-vertex colors
     const positions: number[] = [];
