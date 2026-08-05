@@ -399,8 +399,6 @@ export function CityScene({
     const group = new THREE.Group();
     const size = bounds.size;
 
-    scene.fog = new THREE.Fog(new THREE.Color(palette.sky), size * 2.1, size * 4.2);
-
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(size * 6, size * 6),
       new THREE.MeshStandardMaterial({ color: palette.ground, roughness: 1 }),

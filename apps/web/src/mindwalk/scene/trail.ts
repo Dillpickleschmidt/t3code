@@ -41,7 +41,6 @@ export class TrailRenderer {
       transparent: true,
       blending: palette.glowBlending,
       depthWrite: false,
-      fog: false,
     });
     this.object = new THREE.LineSegments(geometry, material);
     this.object.frustumCulled = false;

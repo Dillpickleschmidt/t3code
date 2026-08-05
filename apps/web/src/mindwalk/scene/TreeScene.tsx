@@ -422,8 +422,6 @@ export function TreeScene({
     const group = new THREE.Group();
     const size = layout.radius * 2.3;
 
-    scene.fog = new THREE.Fog(new THREE.Color(palette.sky), size * 2.1, size * 4.2);
-
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(size * 6, size * 6),
       new THREE.MeshStandardMaterial({ color: palette.ground, roughness: 1 }),
@@ -469,10 +467,8 @@ export function TreeScene({
     // leaves: one orb per file, sized by sqrt(lines) — solid for files on
     // disk, wireframe for ghosts (touched in the session, gone from the
     // repo): shape separates them where a third grey never could.
-    // state colors must not fade with distance, so leaf-like materials
-    // opt out of the fog; only the ground plane keeps the depth cue
     const leafGeo = new THREE.SphereGeometry(0.5, 10, 8);
-    const leafMat = new THREE.MeshBasicMaterial({ toneMapped: false, fog: false });
+    const leafMat = new THREE.MeshBasicMaterial({ toneMapped: false });
     const leaves = new THREE.InstancedMesh(leafGeo, leafMat, city.files.length);
     leaves.instanceColor = new THREE.InstancedBufferAttribute(
       new Float32Array(city.files.length * 3),
@@ -514,7 +510,6 @@ export function TreeScene({
           transparent: true,
           opacity: 0.85,
           toneMapped: false,
-          fog: false,
         }),
         ghostFiles.length,
       );
@@ -556,7 +551,6 @@ export function TreeScene({
         opacity: 0.55,
         depthWrite: false,
         toneMapped: false,
-        fog: false,
       }),
       city.files.length,
     );
@@ -581,7 +575,6 @@ export function TreeScene({
         blending: palette.glowBlending,
         depthWrite: false,
         transparent: true,
-        fog: false,
       }),
     );
     firefly.userData.baseScale = Math.max(size * 0.026, 2.2);
@@ -598,7 +591,6 @@ export function TreeScene({
       side: THREE.DoubleSide,
       depthWrite: false,
       toneMapped: false,
-      fog: false,
     });
     const ring = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.5, 48), selectionMat);
     ring.rotation.x = -Math.PI / 2;
@@ -614,7 +606,6 @@ export function TreeScene({
         blending: palette.glowBlending,
         depthWrite: false,
         toneMapped: false,
-        fog: false,
       }),
     );
     beam.visible = false;

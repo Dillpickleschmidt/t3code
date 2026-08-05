@@ -58,7 +58,6 @@ export class DirLabelSet {
           depthWrite: false,
           depthTest: !alwaysOnTop,
           toneMapped: false,
-          fog: false,
         }),
       );
       if (alwaysOnTop) sprite.renderOrder = 20;

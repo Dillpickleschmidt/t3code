@@ -44,7 +44,7 @@ export type MindwalkTheme = "light" | "dark";
  */
 export interface ScenePalette {
   /**
-   * Scene background and fog target — distant geometry fades into it.
+   * Scene background.
    *
    * The value here is only a fallback. At runtime the surface reads its own
    * computed `--background` and overrides this, so the stage is exactly the
@@ -63,9 +63,7 @@ export interface ScenePalette {
      * brightest thing at night and the deepest thing by day. */
     readonly selected: string;
   };
-  /** The plain the map sits on, and the survey grid ruled over it. Huge
-   * meshes: at night they are a shade above the sky, and by day they must be
-   * the paper itself or the fog turns them into a gradient wash. */
+  /** The plain the map sits on, and the survey grid ruled over it. */
   readonly ground: string;
   readonly gridMajor: string;
   readonly gridMinor: string;
@@ -394,7 +392,7 @@ export function resolveScenePalette(host: HTMLElement, theme: MindwalkTheme): Sc
       context.clearRect(0, 0, 1, 1);
       context.fillRect(0, 0, 1, 1);
       const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data;
-      // the stage is opaque; a see-through sky is not a usable fog target
+      // the stage is opaque; a see-through sky is not a usable background
       if (alpha !== 255) return undefined;
       const hex = (channel: number | undefined) => (channel ?? 0).toString(16).padStart(2, "0");
       return `#${hex(red)}${hex(green)}${hex(blue)}`;
